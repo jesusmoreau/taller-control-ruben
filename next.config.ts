@@ -5,8 +5,8 @@ const nextConfig: NextConfig = {
   env: {
     NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL,
   },
-  cacheComponents: true,
-  partialPrefetching: true,
+  // Sin cacheComponents: con él, Next mantiene montadas las pantallas visitadas (React Activity)
+  // y el formulario de "Nuevo evento" reaparecía con los datos del evento anterior.
   turbopack: {
     rules: {
       "*.css": {
