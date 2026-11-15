@@ -4,7 +4,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/icons";
 import { PlateScanner } from "@/components/PlateScanner";
-import { VoiceButton } from "@/components/VoiceButton";
 import { VoiceRecorder, type RecordedNote } from "@/components/VoiceRecorder";
 import { AudioPlayer } from "@/components/AudioPlayer";
 import { Card, Header, Notice, SectionTitle, inputClass, primaryButton, secondaryButton } from "@/components/ui";
@@ -14,6 +13,7 @@ import { supabaseBrowser } from "@/lib/supabase-browser";
 import { ENTRY_TAG, TAGS, computeStays, formatDuration } from "@/lib/tags";
 import type { CarEvent } from "@/lib/types";
 import { useNow } from "@/lib/useNow";
+import { transcribe, type TranscribeProgress } from "@/lib/transcribe";
 
 type Pending = { id: string; blob: Blob; preview: string; kind: "plate" | "car" };
 
@@ -38,6 +38,9 @@ function NewEventForm() {
   const [description, setDescription] = useState("");
   const [photos, setPhotos] = useState<Pending[]>([]);
   const [notes, setNotes] = useState<RecordedNote[]>([]);
+  // Estado de la transcripción de cada nota de voz, por id.
+  const [stt, setStt] = useState<Record<string, { state: "working" | "done" | "error"; info?: string }>>({});
+  const transcribing = Object.values(stt).some((t) => t.state === "working");
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -94,6 +97,29 @@ function NewEventForm() {
   function removePhoto(p: Pending) {
     URL.revokeObjectURL(p.preview);
     setPhotos((l) => l.filter((x) => x.id !== p.id));
+  }
+
+  // Guarda la nota y la pasa a texto en el dispositivo; el texto se añade a la descripción.
+  async function addNote(n: RecordedNote) {
+    setNotes((l) => [...l, n]);
+    const set = (state: "working" | "done" | "error", info: string) =>
+      setStt((m) => ({ ...m, [n.id]: { state, info } }));
+    set("working", "Preparando transcripción…");
+    try {
+      const text = await transcribe(n.blob, (p: TranscribeProgress) =>
+        p.stage === "download"
+          ? set("working", `Descargando el transcriptor (solo la primera vez): ${Math.round(p.progress)} %`)
+          : set("working", "Pasando a texto…"),
+      );
+      if (!text) return set("error", "No se ha entendido nada; el audio se guarda igual.");
+      setDescription((d) => {
+        const clean = text.charAt(0).toUpperCase() + text.slice(1);
+        return d.trim() ? `${d.trim()}${/[.!?]$/.test(d.trim()) ? "" : "."} ${clean}` : clean;
+      });
+      set("done", "Texto añadido a la descripción. Revísalo antes de guardar.");
+    } catch {
+      set("error", "No se pudo pasar a texto; el audio se guarda igual.");
+    }
   }
 
   async function save() {
@@ -163,7 +189,9 @@ function NewEventForm() {
       : "Guardando…"
     : saving
       ? "Guardando…"
-      : "Guardar evento";
+      : transcribing
+        ? "Pasando la nota a texto…"
+        : "Guardar evento";
 
   return (
     <>
@@ -255,18 +283,7 @@ function NewEventForm() {
             placeholder="Ej.: llega con daños en la parte interna de la puerta del conductor."
             className={`${inputClass} resize-none`}
           />
-          <div className="flex flex-wrap items-start gap-x-2">
-            <VoiceButton
-              onText={(t) =>
-                setDescription((d) => {
-                  const text = t.charAt(0).toUpperCase() + t.slice(1);
-                  if (!d.trim()) return text;
-                  return /[.!?]$/.test(d.trim()) ? `${d.trim()} ${text}` : `${d.trim()}. ${text}`;
-                })
-              }
-            />
-            <VoiceRecorder onRecorded={(n) => setNotes((l) => [...l, n])} />
-          </div>
+          <VoiceRecorder onRecorded={addNote} />
           {notes.length > 0 && (
             <div className="mt-3 flex flex-col gap-2">
               {notes.map((n) => (
@@ -277,8 +294,26 @@ function NewEventForm() {
                     onRemove={() => {
                       URL.revokeObjectURL(n.url);
                       setNotes((l) => l.filter((x) => x.id !== n.id));
+                      setStt((m) => {
+                        const rest = { ...m };
+                        delete rest[n.id];
+                        return rest;
+                      });
                     }}
                   />
+                  {stt[n.id] && (
+                    <p
+                      className={`mt-1 flex items-center gap-1.5 px-2 text-xs ${
+                        stt[n.id].state === "error" ? "text-danger" : stt[n.id].state === "done" ? "text-success" : "text-muted"
+                      }`}
+                    >
+                      <Icon
+                        name={stt[n.id].state === "working" ? "loader" : stt[n.id].state === "done" ? "check" : "alert"}
+                        size={13}
+                      />
+                      {stt[n.id].info}
+                    </p>
+                  )}
                 </div>
               ))}
             </div>
@@ -349,7 +384,7 @@ function NewEventForm() {
       </main>
 
       <div className="fixed inset-x-0 bottom-0 z-20 border-t border-line/60 bg-header p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] backdrop-blur-xl">
-        <button onClick={save} disabled={saving || !normalized} className={`${primaryButton} relative mx-auto flex w-full max-w-xl overflow-hidden py-4 text-lg`}>
+        <button onClick={save} disabled={saving || transcribing || !normalized} className={`${primaryButton} relative mx-auto flex w-full max-w-xl overflow-hidden py-4 text-lg`}>
           {progress && (
             <span
               className="absolute inset-y-0 left-0 bg-white/20 transition-all duration-300"

@@ -177,8 +177,9 @@ export function VoiceRecorder({ onRecorded }: { onRecorded: (note: RecordedNote)
         onClick={start}
         className="inline-flex items-center gap-2 rounded-full bg-surface-2 px-4 py-2 text-sm font-semibold text-fg transition hover:brightness-95 active:scale-95"
       >
-        <span className="h-2.5 w-2.5 rounded-full bg-danger" />
+        <Icon name="mic" size={18} className="text-danger" />
         Grabar nota de voz
+        <span className="font-normal text-muted">· se pasa a texto</span>
       </button>
       {error && <p className="animate-fade-up mt-2 text-sm text-danger">{error}</p>}
     </div>
