@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { BUCKET, supabaseAdmin } from "@/lib/supabase-server";
 import { normalizePlate } from "@/lib/plate";
+import { computeStays } from "@/lib/tags";
 import type { CarEvent, PlateSummary } from "@/lib/types";
 
 type PhotoRow = { id: string; path: string; kind: "plate" | "car" };
@@ -50,18 +51,24 @@ export async function GET(request: Request) {
   const q = normalizePlate(params.get("q") ?? "");
   let query = db
     .from("events")
-    .select("plate, occurred_at, description, photos(path, kind)")
+    .select("id, plate, occurred_at, description, photos(path, kind)")
     .order("occurred_at", { ascending: false })
-    .limit(400);
+    .limit(1000);
   if (q) query = query.ilike("plate", `%${q}%`);
   const { data, error } = await query.returns<
-    { plate: string; occurred_at: string; description: string; photos: { path: string; kind: string }[] }[]
+    { id: string; plate: string; occurred_at: string; description: string; photos: { path: string; kind: string }[] }[]
   >();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   // Resumen por matrícula: nº de eventos, último evento y una miniatura
   // (la foto del coche más reciente; si no hay, la de la matrícula).
   const map = new Map<string, PlateSummary & { thumbPath: string | null }>();
+  const byPlate = new Map<string, typeof data>();
+  for (const row of data) {
+    const list = byPlate.get(row.plate);
+    if (list) list.push(row);
+    else byPlate.set(row.plate, [row]);
+  }
   for (const row of data) {
     const photo = row.photos.find((p) => p.kind === "car") ?? row.photos[0];
     const s = map.get(row.plate);
@@ -76,6 +83,7 @@ export async function GET(request: Request) {
         lastDescription: row.description,
         thumb: null,
         thumbPath: photo?.path ?? null,
+        insideSince: computeStays(byPlate.get(row.plate) ?? []).openSince,
       });
     }
   }

@@ -9,11 +9,12 @@ import { Card, Header, Notice, SectionTitle, inputClass, primaryButton, secondar
 import { compressImage } from "@/lib/image";
 import { formatPlate, isValidPlate, normalizePlate } from "@/lib/plate";
 import { supabaseBrowser } from "@/lib/supabase-browser";
+import { ENTRY_TAG, TAGS, computeStays, formatDuration } from "@/lib/tags";
+import type { CarEvent } from "@/lib/types";
+import { useNow } from "@/lib/useNow";
 
 type Pending = { id: string; blob: Blob; preview: string; kind: "plate" | "car" };
 
-// Tipos de evento frecuentes: un toque y queda escrito al principio de la descripción.
-const QUICK = ["Llegada", "Salida", "Daños", "Reparación", "Revisión", "Entrega al cliente"];
 
 function nowLocal(): string {
   const d = new Date();
@@ -28,6 +29,10 @@ function NewEventForm() {
   const [scanInfo, setScanInfo] = useState("");
   const [occurredAt, setOccurredAt] = useState(nowLocal);
   const [tag, setTag] = useState<string | null>(null);
+  // Si el usuario elige el tipo a mano, ya no se cambia automáticamente.
+  const [tagTouched, setTagTouched] = useState(false);
+  const now = useNow();
+  const [carStatus, setCarStatus] = useState<{ plate: string; isNew: boolean; insideSince: string | null } | null>(null);
   const [description, setDescription] = useState("");
   const [photos, setPhotos] = useState<Pending[]>([]);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
@@ -38,7 +43,27 @@ function NewEventForm() {
 
   const normalized = normalizePlate(plate);
   const plateOk = isValidPlate(normalized);
-  const dirty = Boolean(description || photos.length || tag);
+  const dirty = Boolean(description || photos.length || tagTouched);
+
+  // Al tener una matrícula válida, consultar su historial:
+  // coche nuevo o fuera del taller → se marca "Llegada"; si está dentro, se avisa.
+  useEffect(() => {
+    if (!plateOk) return;
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      const res = await fetch(`/api/events?plate=${normalized}`);
+      if (!res.ok || cancelled) return;
+      const { events } = (await res.json()) as { events: CarEvent[] };
+      const { openSince } = computeStays(events);
+      setCarStatus({ plate: normalized, isNew: events.length === 0, insideSince: openSince });
+      if (!tagTouched) setTag(openSince ? null : ENTRY_TAG);
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [normalized, plateOk, tagTouched]);
+  const status = carStatus?.plate === normalized ? carStatus : null;
 
   // Avisar si se intenta cerrar la página con datos sin guardar.
   useEffect(() => {
@@ -161,6 +186,16 @@ function NewEventForm() {
               </Notice>
             )}
             {scanInfo && <Notice tone="warn">{scanInfo}</Notice>}
+            {status?.isNew && (
+              <Notice tone="success">Coche nuevo: se registrará como llegada al taller.</Notice>
+            )}
+            {status?.insideSince && (
+              <Notice tone="success">
+                Este coche está en el taller desde hace{" "}
+                {formatDuration(now - new Date(status.insideSince).getTime())}. Si sale ahora, marca “Salida” o
+                “Entrega al cliente” y se calculará el tiempo.
+              </Notice>
+            )}
           </div>
           <div className="mt-3">
             <PlateScanner
@@ -178,11 +213,14 @@ function NewEventForm() {
         <Card className="animate-fade-up [animation-delay:40ms]">
           <SectionTitle>¿Qué ha pasado?</SectionTitle>
           <div className="-mx-1 mb-3 flex flex-wrap gap-2 px-1">
-            {QUICK.map((t) => (
+            {TAGS.map((t) => (
               <button
                 key={t}
                 type="button"
-                onClick={() => setTag((cur) => (cur === t ? null : t))}
+                onClick={() => {
+                  setTagTouched(true);
+                  setTag((cur) => (cur === t ? null : t));
+                }}
                 aria-pressed={tag === t}
                 className={`rounded-full border px-3 py-1.5 text-sm font-medium transition active:scale-95 ${
                   tag === t

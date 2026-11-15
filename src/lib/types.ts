@@ -18,4 +18,6 @@ export type PlateSummary = {
   last: string;
   lastDescription: string;
   thumb: string | null;
+  /** Fecha de la llegada si el coche sigue en el taller; null si no. */
+  insideSince: string | null;
 };

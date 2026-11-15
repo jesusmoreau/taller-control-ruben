@@ -8,7 +8,9 @@ import { PlateBadge } from "@/components/PlateBadge";
 import { PlateScanner } from "@/components/PlateScanner";
 import { Header, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { formatPlate, normalizePlate } from "@/lib/plate";
+import { formatDuration } from "@/lib/tags";
 import { timeAgo } from "@/lib/time";
+import { useNow } from "@/lib/useNow";
 import type { PlateSummary } from "@/lib/types";
 
 export default function Home() {
@@ -30,8 +32,13 @@ export default function Home() {
     };
   }, [query]);
 
+  const [onlyInside, setOnlyInside] = useState(false);
+  const now = useNow();
   const loading = !result || result.q !== query;
-  const plates = result?.plates ?? [];
+  const allPlates = result?.plates ?? [];
+  const insideCount = allPlates.filter((p) => p.insideSince).length;
+  const showInside = onlyInside && insideCount > 0;
+  const plates = showInside ? allPlates.filter((p) => p.insideSince) : allPlates;
 
   async function logout() {
     await fetch("/api/logout", { method: "POST" });
@@ -101,6 +108,29 @@ export default function Home() {
             {query ? "Resultados" : "Actividad reciente"}
           </SectionTitle>
 
+          {insideCount > 0 && (
+            <div className="-mt-1 mb-3 flex gap-2">
+              {[
+                { on: false, label: "Todos" },
+                { on: true, label: `En el taller · ${insideCount}` },
+              ].map((f) => (
+                <button
+                  key={f.label}
+                  onClick={() => setOnlyInside(f.on)}
+                  aria-pressed={showInside === f.on}
+                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition active:scale-95 ${
+                    showInside === f.on
+                      ? "border-accent bg-accent text-accent-fg"
+                      : "border-line bg-surface text-fg hover:border-accent/40"
+                  }`}
+                >
+                  {f.on && <span className="h-2 w-2 rounded-full bg-success" />}
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          )}
+
           {loading && plates.length === 0 && (
             <div className="flex flex-col gap-2">
               {[0, 1, 2].map((i) => (
@@ -152,9 +182,16 @@ export default function Home() {
                     <PlateBadge plate={p.plate} size="sm" />
                     <p className="mt-1 truncate text-sm text-muted">{p.lastDescription || "Sin descripción"}</p>
                   </div>
-                  <div className="shrink-0 text-right text-xs text-muted">
-                    <div>{timeAgo(p.last)}</div>
-                    <div className="mt-1 inline-block rounded-full bg-surface-2 px-2 py-0.5 font-medium tabular-nums text-fg">
+                  <div className="flex shrink-0 flex-col items-end gap-1 text-right text-xs text-muted">
+                    {p.insideSince ? (
+                      <div className="inline-flex items-center gap-1 rounded-full bg-success-soft px-2 py-0.5 font-semibold text-success">
+                        <span className="h-1.5 w-1.5 rounded-full bg-success" />
+                        {formatDuration(now - new Date(p.insideSince).getTime())}
+                      </div>
+                    ) : (
+                      <div>{timeAgo(p.last)}</div>
+                    )}
+                    <div className="rounded-full bg-surface-2 px-2 py-0.5 font-medium tabular-nums text-fg">
                       {p.events} {p.events === 1 ? "evento" : "eventos"}
                     </div>
                   </div>

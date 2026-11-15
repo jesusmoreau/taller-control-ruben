@@ -8,14 +8,10 @@ import { Lightbox } from "@/components/Lightbox";
 import { PlateBadge } from "@/components/PlateBadge";
 import { Header, Notice, Skeleton, Toast } from "@/components/ui";
 import { normalizePlate } from "@/lib/plate";
+import { computeStays, formatDuration, splitTag } from "@/lib/tags";
 import { formatDate, formatDateTime, timeAgo } from "@/lib/time";
+import { useNow } from "@/lib/useNow";
 import type { CarEvent } from "@/lib/types";
-
-// Si la descripción empieza por "Tipo: ...", separa el tipo para mostrarlo como etiqueta.
-function splitTag(text: string): { tag: string | null; body: string } {
-  const m = text.match(/^(Llegada|Salida|Daños|Reparación|Revisión|Entrega al cliente)(?::\s*|$)([\s\S]*)$/);
-  return m ? { tag: m[1], body: m[2] } : { tag: null, body: text };
-}
 
 const TAG_STYLE: Record<string, string> = {
   Llegada: "bg-accent-soft text-accent",
@@ -72,6 +68,8 @@ export function CarView({ plate: rawPlate }: { plate: string }) {
   const clearToast = useCallback(() => setToast(""), []);
   const photoCount = events?.reduce((n, e) => n + e.photos.length, 0) ?? 0;
   const first = events?.length ? events[events.length - 1].occurred_at : null;
+  const now = useNow();
+  const stays = events ? computeStays(events, now) : null;
 
   return (
     <>
@@ -80,11 +78,29 @@ export function CarView({ plate: rawPlate }: { plate: string }) {
       <main className="mx-auto flex w-full max-w-xl flex-col gap-5 px-4 pb-32 pt-5">
         <section className="animate-fade-up flex flex-col items-center gap-4 text-center">
           <PlateBadge plate={plate} size="lg" />
+          {first && <p className="-mt-2 text-xs text-muted">Primer registro: {formatDate(first)}</p>}
+
+          {stays?.openSince && (
+            <div className="animate-fade-up flex w-full items-center gap-3 rounded-2xl border border-success/30 bg-success-soft px-4 py-3 text-left">
+              <span className="relative flex h-3 w-3 shrink-0">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-60" />
+                <span className="relative inline-flex h-3 w-3 rounded-full bg-success" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold text-success">En el taller ahora</p>
+                <p className="text-sm text-fg/80">
+                  Lleva {formatDuration(now - new Date(stays.openSince).getTime())} · entró el{" "}
+                  {formatDateTime(stays.openSince)}
+                </p>
+              </div>
+            </div>
+          )}
+
           {events && events.length > 0 && (
             <div className="grid w-full grid-cols-3 divide-x divide-line rounded-2xl border border-line bg-surface py-3 shadow-card">
-              <Stat value={events.length} label={events.length === 1 ? "evento" : "eventos"} />
+              <Stat value={stays?.visits ?? 0} label={stays?.visits === 1 ? "visita" : "visitas"} />
+              <Stat value={stays && stays.totalMs > 0 ? formatDuration(stays.totalMs) : "–"} label="en el taller" small />
               <Stat value={photoCount} label={photoCount === 1 ? "foto" : "fotos"} />
-              <Stat value={first ? formatDate(first) : "–"} label="primera visita" small />
             </div>
           )}
         </section>
@@ -162,10 +178,20 @@ export function CarView({ plate: rawPlate }: { plate: string }) {
                     )}
                   </header>
 
-                  {tag && (
-                    <span className={`mt-3 inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold ${TAG_STYLE[tag]}`}>
-                      {tag}
-                    </span>
+                  {(tag || stays?.exitDurations.has(e.id)) && (
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      {tag && (
+                        <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold ${TAG_STYLE[tag]}`}>
+                          {tag}
+                        </span>
+                      )}
+                      {stays?.exitDurations.has(e.id) && (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-line px-2.5 py-0.5 text-xs font-semibold text-fg">
+                          <Icon name="clock" size={13} />
+                          {formatDuration(stays.exitDurations.get(e.id)!)} en el taller
+                        </span>
+                      )}
+                    </div>
                   )}
                   {body && <p className="mt-2 whitespace-pre-wrap leading-relaxed">{body}</p>}
                   {!tag && !body && <p className="mt-2 text-sm italic text-muted">Sin descripción</p>}
