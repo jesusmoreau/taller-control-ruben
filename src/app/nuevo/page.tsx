@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/icons";
 import { PlateScanner } from "@/components/PlateScanner";
+import { VoiceButton } from "@/components/VoiceButton";
 import { Card, Header, Notice, SectionTitle, inputClass, primaryButton, secondaryButton } from "@/components/ui";
 import { compressImage } from "@/lib/image";
 import { formatPlate, isValidPlate, normalizePlate } from "@/lib/plate";
@@ -199,6 +200,15 @@ function NewEventForm() {
             rows={4}
             placeholder="Ej.: llega con daños en la parte interna de la puerta del conductor."
             className={`${inputClass} resize-none`}
+          />
+          <VoiceButton
+            onText={(t) =>
+              setDescription((d) => {
+                const text = t.charAt(0).toUpperCase() + t.slice(1);
+                if (!d.trim()) return text;
+                return /[.!?]$/.test(d.trim()) ? `${d.trim()} ${text}` : `${d.trim()}. ${text}`;
+              })
+            }
           />
           <div className="mt-3 flex min-w-0 items-center gap-2">
             <Icon name="clock" size={18} className="text-muted" />

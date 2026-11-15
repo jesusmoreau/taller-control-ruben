@@ -108,6 +108,14 @@ const paths = {
     </>
   ),
   loader: <path d="M21 12a9 9 0 1 1-6.2-8.6" />,
+  mic: (
+    <>
+      <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+      <path d="M12 19v3" />
+    </>
+  ),
+  stop: <rect x="6" y="6" width="12" height="12" rx="2" />,
   lock: (
     <>
       <rect x="3" y="11" width="18" height="11" rx="2" />
