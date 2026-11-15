@@ -28,3 +28,16 @@ alter table public.photos enable row level security;
 insert into storage.buckets (id, name, public)
 values ('photos', 'photos', false)
 on conflict (id) do nothing;
+
+-- Notas de voz por evento (el audio va en el mismo bucket "photos").
+create table if not exists public.audios (
+  id          uuid primary key default gen_random_uuid(),
+  event_id    uuid not null references public.events (id) on delete cascade,
+  path        text not null,
+  duration_ms integer not null default 0,
+  mime        text not null default 'audio/webm',
+  created_at  timestamptz not null default now()
+);
+
+create index if not exists audios_event_idx on public.audios (event_id);
+alter table public.audios enable row level security;

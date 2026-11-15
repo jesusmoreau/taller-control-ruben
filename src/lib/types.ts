@@ -4,12 +4,20 @@ export type Photo = {
   url: string;
 };
 
+export type VoiceNote = {
+  id: string;
+  url: string;
+  durationMs: number;
+  mime: string;
+};
+
 export type CarEvent = {
   id: string;
   plate: string;
   occurred_at: string;
   description: string;
   photos: Photo[];
+  audios: VoiceNote[];
 };
 
 export type PlateSummary = {

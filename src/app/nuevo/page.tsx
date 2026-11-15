@@ -5,6 +5,8 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/icons";
 import { PlateScanner } from "@/components/PlateScanner";
 import { VoiceButton } from "@/components/VoiceButton";
+import { VoiceRecorder, type RecordedNote } from "@/components/VoiceRecorder";
+import { AudioPlayer } from "@/components/AudioPlayer";
 import { Card, Header, Notice, SectionTitle, inputClass, primaryButton, secondaryButton } from "@/components/ui";
 import { compressImage } from "@/lib/image";
 import { formatPlate, isValidPlate, normalizePlate } from "@/lib/plate";
@@ -35,6 +37,7 @@ function NewEventForm() {
   const [carStatus, setCarStatus] = useState<{ plate: string; isNew: boolean; insideSince: string | null } | null>(null);
   const [description, setDescription] = useState("");
   const [photos, setPhotos] = useState<Pending[]>([]);
+  const [notes, setNotes] = useState<RecordedNote[]>([]);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -43,7 +46,7 @@ function NewEventForm() {
 
   const normalized = normalizePlate(plate);
   const plateOk = isValidPlate(normalized);
-  const dirty = Boolean(description || photos.length || tagTouched);
+  const dirty = Boolean(description || photos.length || notes.length || tagTouched);
 
   // Al tener una matrícula válida, consultar su historial:
   // coche nuevo o fuera del taller → se marca "Llegada"; si está dentro, se avisa.
@@ -98,28 +101,39 @@ function NewEventForm() {
     if (!normalized) return setError("Falta la matrícula");
     setSaving(true);
     try {
-      let uploaded: { path: string; kind: Pending["kind"] }[] = [];
-      if (photos.length) {
-        setProgress({ done: 0, total: photos.length });
+      // Fotos y notas de voz se suben juntas, directamente a Supabase Storage.
+      const files = [
+        ...photos.map((p) => ({ blob: p.blob, ext: "jpg", contentType: "image/jpeg" })),
+        ...notes.map((n) => ({ blob: n.blob, ext: n.ext, contentType: n.mime })),
+      ];
+      let paths: string[] = [];
+      if (files.length) {
+        setProgress({ done: 0, total: files.length });
         const res = await fetch("/api/uploads", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ plate: normalized, count: photos.length }),
+          body: JSON.stringify({ plate: normalized, exts: files.map((f) => f.ext) }),
         });
         const { uploads, error: e } = await res.json();
         if (!res.ok) throw new Error(e);
-        uploaded = await Promise.all(
-          photos.map(async (p, i) => {
+        paths = await Promise.all(
+          files.map(async (f, i) => {
             const { path, token } = uploads[i];
             const { error: upErr } = await supabaseBrowser.storage
               .from("photos")
-              .uploadToSignedUrl(path, token, p.blob, { contentType: "image/jpeg" });
+              .uploadToSignedUrl(path, token, f.blob, { contentType: f.contentType });
             if (upErr) throw upErr;
             setProgress((pr) => (pr ? { ...pr, done: pr.done + 1 } : pr));
-            return { path, kind: p.kind };
+            return path;
           }),
         );
       }
+      const uploadedPhotos = photos.map((p, i) => ({ path: paths[i], kind: p.kind }));
+      const uploadedNotes = notes.map((n, i) => ({
+        path: paths[photos.length + i],
+        durationMs: n.durationMs,
+        mime: n.mime,
+      }));
       const text = [tag, description.trim()].filter(Boolean).join(": ");
       const res = await fetch("/api/events", {
         method: "POST",
@@ -128,7 +142,8 @@ function NewEventForm() {
           plate: normalized,
           occurredAt: new Date(occurredAt).toISOString(),
           description: text,
-          photos: uploaded,
+          photos: uploadedPhotos,
+          audios: uploadedNotes,
         }),
       });
       const data = await res.json();
@@ -141,9 +156,10 @@ function NewEventForm() {
     }
   }
 
+
   const buttonLabel = progress
     ? progress.done < progress.total
-      ? `Subiendo fotos ${progress.done}/${progress.total}…`
+      ? `Subiendo archivos ${progress.done}/${progress.total}…`
       : "Guardando…"
     : saving
       ? "Guardando…"
@@ -239,15 +255,34 @@ function NewEventForm() {
             placeholder="Ej.: llega con daños en la parte interna de la puerta del conductor."
             className={`${inputClass} resize-none`}
           />
-          <VoiceButton
-            onText={(t) =>
-              setDescription((d) => {
-                const text = t.charAt(0).toUpperCase() + t.slice(1);
-                if (!d.trim()) return text;
-                return /[.!?]$/.test(d.trim()) ? `${d.trim()} ${text}` : `${d.trim()}. ${text}`;
-              })
-            }
-          />
+          <div className="flex flex-wrap items-start gap-x-2">
+            <VoiceButton
+              onText={(t) =>
+                setDescription((d) => {
+                  const text = t.charAt(0).toUpperCase() + t.slice(1);
+                  if (!d.trim()) return text;
+                  return /[.!?]$/.test(d.trim()) ? `${d.trim()} ${text}` : `${d.trim()}. ${text}`;
+                })
+              }
+            />
+            <VoiceRecorder onRecorded={(n) => setNotes((l) => [...l, n])} />
+          </div>
+          {notes.length > 0 && (
+            <div className="mt-3 flex flex-col gap-2">
+              {notes.map((n) => (
+                <div key={n.id} className="animate-pop-in">
+                  <AudioPlayer
+                    src={n.url}
+                    durationMs={n.durationMs}
+                    onRemove={() => {
+                      URL.revokeObjectURL(n.url);
+                      setNotes((l) => l.filter((x) => x.id !== n.id));
+                    }}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
           <div className="mt-3 flex min-w-0 items-center gap-2">
             <Icon name="clock" size={18} className="text-muted" />
             <input

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { AudioPlayer } from "@/components/AudioPlayer";
 import { Icon } from "@/components/icons";
 import { Lightbox } from "@/components/Lightbox";
 import { PlateBadge } from "@/components/PlateBadge";
@@ -194,7 +195,17 @@ export function CarView({ plate: rawPlate }: { plate: string }) {
                     </div>
                   )}
                   {body && <p className="mt-2 whitespace-pre-wrap leading-relaxed">{body}</p>}
-                  {!tag && !body && <p className="mt-2 text-sm italic text-muted">Sin descripción</p>}
+                  {!tag && !body && !e.audios?.length && (
+                    <p className="mt-2 text-sm italic text-muted">Sin descripción</p>
+                  )}
+
+                  {e.audios?.length > 0 && (
+                    <div className="mt-3 flex flex-col gap-2">
+                      {e.audios.map((a) => (
+                        <AudioPlayer key={a.id} src={a.url} durationMs={a.durationMs} />
+                      ))}
+                    </div>
+                  )}
 
                   {e.photos.length > 0 && (
                     <div className={`mt-3 grid gap-1.5 ${e.photos.length === 1 ? "grid-cols-1" : "grid-cols-3"}`}>

@@ -5,15 +5,17 @@ import { computeStays } from "@/lib/tags";
 import type { CarEvent, PlateSummary } from "@/lib/types";
 
 type PhotoRow = { id: string; path: string; kind: "plate" | "car" };
+type AudioRow = { id: string; path: string; duration_ms: number; mime: string };
 type EventRow = {
   id: string;
   plate: string;
   occurred_at: string;
   description: string;
   photos: PhotoRow[];
+  audios: AudioRow[];
 };
 
-// GET /api/events?plate=1234BCD → eventos de esa matrícula con fotos (URLs firmadas)
+// GET /api/events?plate=1234BCD → eventos de esa matrícula con fotos y notas de voz (URLs firmadas)
 // GET /api/events?q=12          → resumen de matrículas que contienen "12" (o las últimas)
 export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
@@ -23,13 +25,13 @@ export async function GET(request: Request) {
   if (plate) {
     const { data, error } = await db
       .from("events")
-      .select("id, plate, occurred_at, description, photos(id, path, kind)")
+      .select("id, plate, occurred_at, description, photos(id, path, kind), audios(id, path, duration_ms, mime)")
       .eq("plate", normalizePlate(plate))
       .order("occurred_at", { ascending: false })
       .returns<EventRow[]>();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-    const paths = data.flatMap((e) => e.photos.map((p) => p.path));
+    const paths = data.flatMap((e) => [...e.photos.map((p) => p.path), ...e.audios.map((a) => a.path)]);
     const urls = new Map<string, string>();
     if (paths.length) {
       const { data: signed } = await db.storage.from(BUCKET).createSignedUrls(paths, 60 * 60);
@@ -44,6 +46,7 @@ export async function GET(request: Request) {
       photos: e.photos
         .sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "plate" ? 1 : -1))
         .map((p) => ({ id: p.id, kind: p.kind, url: urls.get(p.path) ?? "" })),
+      audios: e.audios.map((a) => ({ id: a.id, url: urls.get(a.path) ?? "", durationMs: a.duration_ms, mime: a.mime })),
     }));
     return NextResponse.json({ events });
   }
@@ -103,13 +106,14 @@ export async function GET(request: Request) {
   return NextResponse.json({ plates });
 }
 
-// POST /api/events { plate, occurredAt, description, photos: [{ path, kind }] }
+// POST /api/events { plate, occurredAt, description, photos: [{ path, kind }], audios: [{ path, durationMs, mime }] }
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => ({}))) as {
     plate?: string;
     occurredAt?: string;
     description?: string;
     photos?: { path: string; kind: "plate" | "car" }[];
+    audios?: { path: string; durationMs: number; mime: string }[];
   };
   const plate = normalizePlate(body.plate ?? "");
   if (!plate) return NextResponse.json({ error: "Falta la matrícula" }, { status: 400 });
@@ -132,6 +136,19 @@ export async function POST(request: Request) {
   if (photos.length) {
     const { error: photoError } = await db.from("photos").insert(photos);
     if (photoError) return NextResponse.json({ error: photoError.message }, { status: 500 });
+  }
+
+  const audios = (body.audios ?? [])
+    .filter((a) => a.path.startsWith(`${plate}/`))
+    .map((a) => ({
+      event_id: event.id,
+      path: a.path,
+      duration_ms: Math.max(0, Math.round(Number(a.durationMs) || 0)),
+      mime: String(a.mime || "audio/webm").slice(0, 60),
+    }));
+  if (audios.length) {
+    const { error: audioError } = await db.from("audios").insert(audios);
+    if (audioError) return NextResponse.json({ error: audioError.message }, { status: 500 });
   }
 
   return NextResponse.json({ id: event.id, plate });
