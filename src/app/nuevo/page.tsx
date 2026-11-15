@@ -1,14 +1,18 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { Icon } from "@/components/icons";
 import { PlateScanner } from "@/components/PlateScanner";
+import { Card, Header, Notice, SectionTitle, inputClass, primaryButton, secondaryButton } from "@/components/ui";
 import { compressImage } from "@/lib/image";
 import { formatPlate, isValidPlate, normalizePlate } from "@/lib/plate";
 import { supabaseBrowser } from "@/lib/supabase-browser";
 
 type Pending = { id: string; blob: Blob; preview: string; kind: "plate" | "car" };
+
+// Tipos de evento frecuentes: un toque y queda escrito al principio de la descripción.
+const QUICK = ["Llegada", "Salida", "Daños", "Reparación", "Revisión", "Entrega al cliente"];
 
 function nowLocal(): string {
   const d = new Date();
@@ -22,12 +26,26 @@ function NewEventForm() {
   const [plate, setPlate] = useState(params.get("plate") ?? "");
   const [scanInfo, setScanInfo] = useState("");
   const [occurredAt, setOccurredAt] = useState(nowLocal);
+  const [tag, setTag] = useState<string | null>(null);
   const [description, setDescription] = useState("");
   const [photos, setPhotos] = useState<Pending[]>([]);
-  const [status, setStatus] = useState("");
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const camera = useRef<HTMLInputElement>(null);
   const gallery = useRef<HTMLInputElement>(null);
+
+  const normalized = normalizePlate(plate);
+  const plateOk = isValidPlate(normalized);
+  const dirty = Boolean(description || photos.length || tag);
+
+  // Avisar si se intenta cerrar la página con datos sin guardar.
+  useEffect(() => {
+    if (!dirty || saving) return;
+    const onLeave = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", onLeave);
+    return () => window.removeEventListener("beforeunload", onLeave);
+  }, [dirty, saving]);
 
   function addPhoto(blob: Blob, kind: Pending["kind"]) {
     setPhotos((list) => [
@@ -44,16 +62,19 @@ function NewEventForm() {
     if (gallery.current) gallery.current.value = "";
   }
 
-  const normalized = normalizePlate(plate);
-  const plateOk = isValidPlate(normalized);
+  function removePhoto(p: Pending) {
+    URL.revokeObjectURL(p.preview);
+    setPhotos((l) => l.filter((x) => x.id !== p.id));
+  }
 
   async function save() {
     setError("");
     if (!normalized) return setError("Falta la matrícula");
+    setSaving(true);
     try {
       let uploaded: { path: string; kind: Pending["kind"] }[] = [];
       if (photos.length) {
-        setStatus(`Subiendo ${photos.length} foto(s)…`);
+        setProgress({ done: 0, total: photos.length });
         const res = await fetch("/api/uploads", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -68,138 +89,197 @@ function NewEventForm() {
               .from("photos")
               .uploadToSignedUrl(path, token, p.blob, { contentType: "image/jpeg" });
             if (upErr) throw upErr;
+            setProgress((pr) => (pr ? { ...pr, done: pr.done + 1 } : pr));
             return { path, kind: p.kind };
           }),
         );
       }
-      setStatus("Guardando evento…");
+      const text = [tag, description.trim()].filter(Boolean).join(": ");
       const res = await fetch("/api/events", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           plate: normalized,
           occurredAt: new Date(occurredAt).toISOString(),
-          description,
+          description: text,
           photos: uploaded,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      router.push(`/coche/${normalized}`);
+      router.push(`/coche/${normalized}?guardado=1`);
     } catch (e) {
-      setStatus("");
+      setSaving(false);
+      setProgress(null);
       setError(e instanceof Error ? e.message : String(e));
     }
   }
 
-  const busy = Boolean(status);
+  const buttonLabel = progress
+    ? progress.done < progress.total
+      ? `Subiendo fotos ${progress.done}/${progress.total}…`
+      : "Guardando…"
+    : saving
+      ? "Guardando…"
+      : "Guardar evento";
 
   return (
-    <main className="mx-auto flex w-full max-w-xl flex-col gap-5 p-4 pb-28">
-      <header className="flex items-center gap-3">
-        <Link href="/" className="text-2xl">←</Link>
-        <h1 className="text-2xl font-bold">Nuevo evento</h1>
-      </header>
+    <>
+      <Header back={normalized ? `/coche/${normalized}` : "/"} title="Nuevo evento" />
 
-      <section className="flex flex-col gap-2">
-        <label className="text-sm font-semibold uppercase text-neutral-500">Matrícula</label>
-        <PlateScanner
-          onResult={(r) => {
-            setPlate(r.plate);
-            setScanInfo(
-              r.confidence === "high" && r.valid
-                ? ""
-                : "Revisa la matrícula: la lectura no es del todo segura.",
-            );
-            addPhoto(r.photo, "plate");
-          }}
-        />
-        <input
-          value={plate}
-          onChange={(e) => setPlate(e.target.value)}
-          placeholder="1234 BCD"
-          autoCapitalize="characters"
-          className="rounded-xl border border-neutral-300 bg-transparent px-4 py-3 text-center font-mono text-2xl uppercase tracking-widest dark:border-neutral-700"
-        />
-        {normalized && !plateOk && (
-          <p className="text-sm text-amber-600">
-            “{formatPlate(normalized)}” no parece una matrícula española. Puedes guardarla igualmente.
-          </p>
-        )}
-        {scanInfo && <p className="text-sm text-amber-600">{scanInfo}</p>}
-      </section>
+      <main className="mx-auto flex w-full max-w-xl flex-col gap-4 px-4 pb-36 pt-5">
+        {/* Matrícula */}
+        <Card className="animate-fade-up">
+          <SectionTitle>Matrícula</SectionTitle>
+          <div className="flex overflow-hidden rounded-xl border-2 border-neutral-900 bg-white shadow-sm focus-within:ring-4 focus-within:ring-accent/25">
+            <div className="flex w-10 flex-col items-center justify-end bg-[#003399] pb-1.5 text-sm font-bold text-white">
+              <span className="mb-auto mt-1.5 text-[10px] text-[#ffcc00]">★</span>E
+            </div>
+            <input
+              value={plate}
+              onChange={(e) => {
+                setPlate(e.target.value);
+                setScanInfo("");
+              }}
+              placeholder="1234 BCD"
+              autoCapitalize="characters"
+              autoComplete="off"
+              aria-label="Matrícula"
+              className="min-w-0 flex-1 bg-white px-3 py-3 text-center font-mono text-3xl font-bold uppercase tracking-[0.15em] text-neutral-900 outline-none placeholder:text-neutral-300"
+            />
+            {normalized && plateOk && (
+              <div className="grid place-items-center pr-3 text-[#12a150]">
+                <Icon name="check" />
+              </div>
+            )}
+          </div>
+          <div className="mt-3 flex flex-col gap-2">
+            {normalized && !plateOk && (
+              <Notice tone="warn">
+                “{formatPlate(normalized)}” no parece una matrícula española. Puedes guardarla igualmente.
+              </Notice>
+            )}
+            {scanInfo && <Notice tone="warn">{scanInfo}</Notice>}
+          </div>
+          <div className="mt-3">
+            <PlateScanner
+              label={normalized ? "Volver a escanear" : "Escanear matrícula"}
+              onResult={(r) => {
+                setPlate(r.plate);
+                setScanInfo("Leída con la cámara: comprueba que coincide antes de guardar.");
+                addPhoto(r.photo, "plate");
+              }}
+            />
+          </div>
+        </Card>
 
-      <section className="flex flex-col gap-2">
-        <label className="text-sm font-semibold uppercase text-neutral-500">Fecha y hora</label>
-        <input
-          type="datetime-local"
-          value={occurredAt}
-          onChange={(e) => setOccurredAt(e.target.value)}
-          className="rounded-xl border border-neutral-300 bg-transparent px-4 py-3 dark:border-neutral-700"
-        />
-      </section>
+        {/* Qué ha pasado */}
+        <Card className="animate-fade-up [animation-delay:40ms]">
+          <SectionTitle>¿Qué ha pasado?</SectionTitle>
+          <div className="-mx-1 mb-3 flex flex-wrap gap-2 px-1">
+            {QUICK.map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTag((cur) => (cur === t ? null : t))}
+                aria-pressed={tag === t}
+                className={`rounded-full border px-3 py-1.5 text-sm font-medium transition active:scale-95 ${
+                  tag === t
+                    ? "border-accent bg-accent text-accent-fg"
+                    : "border-line bg-surface-2 text-fg hover:border-accent/40"
+                }`}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={4}
+            placeholder="Ej.: llega con daños en la parte interna de la puerta del conductor."
+            className={`${inputClass} resize-none`}
+          />
+          <div className="mt-3 flex min-w-0 items-center gap-2">
+            <Icon name="clock" size={18} className="text-muted" />
+            <input
+              type="datetime-local"
+              value={occurredAt}
+              onChange={(e) => setOccurredAt(e.target.value)}
+              aria-label="Fecha y hora"
+              className={`${inputClass} min-w-0 flex-1 px-3 py-2.5 text-[15px]`}
+            />
+            <button
+              type="button"
+              onClick={() => setOccurredAt(nowLocal())}
+              className="shrink-0 rounded-lg px-2 py-2 text-sm font-semibold text-accent hover:bg-accent-soft"
+            >
+              Ahora
+            </button>
+          </div>
+        </Card>
 
-      <section className="flex flex-col gap-2">
-        <label className="text-sm font-semibold uppercase text-neutral-500">Evento</label>
-        <textarea
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          rows={4}
-          placeholder="Ej.: Coche llegando con daños en la parte interna de la puerta."
-          className="rounded-xl border border-neutral-300 bg-transparent px-4 py-3 dark:border-neutral-700"
-        />
-      </section>
+        {/* Fotos */}
+        <Card className="animate-fade-up [animation-delay:80ms]">
+          <SectionTitle aside={photos.length > 0 && <span className="text-xs text-muted">{photos.length}</span>}>
+            Fotos
+          </SectionTitle>
+          <input ref={camera} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => addFiles(e.target.files)} />
+          <input ref={gallery} type="file" accept="image/*" multiple className="hidden" onChange={(e) => addFiles(e.target.files)} />
 
-      <section className="flex flex-col gap-2">
-        <label className="text-sm font-semibold uppercase text-neutral-500">Fotos ({photos.length})</label>
-        <input ref={camera} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => addFiles(e.target.files)} />
-        <input ref={gallery} type="file" accept="image/*" multiple className="hidden" onChange={(e) => addFiles(e.target.files)} />
-        <div className="grid grid-cols-2 gap-2">
-          <button type="button" onClick={() => camera.current?.click()} className="rounded-xl border border-neutral-300 px-4 py-3 font-semibold dark:border-neutral-700">
-            📷 Hacer foto
-          </button>
-          <button type="button" onClick={() => gallery.current?.click()} className="rounded-xl border border-neutral-300 px-4 py-3 font-semibold dark:border-neutral-700">
-            🖼️ Galería
-          </button>
-        </div>
-        {photos.length > 0 && (
           <div className="grid grid-cols-3 gap-2">
             {photos.map((p) => (
-              <div key={p.id} className="relative aspect-square overflow-hidden rounded-lg bg-neutral-200 dark:bg-neutral-800">
+              <div key={p.id} className="animate-pop-in relative aspect-square overflow-hidden rounded-xl bg-surface-2">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={p.preview} alt="" className="h-full w-full object-cover" />
                 {p.kind === "plate" && (
-                  <span className="absolute left-1 top-1 rounded bg-blue-700 px-1 text-[10px] font-bold text-white">MATRÍCULA</span>
+                  <span className="absolute bottom-1 left-1 rounded-md bg-[#003399] px-1.5 py-0.5 text-[10px] font-bold text-white">
+                    MATRÍCULA
+                  </span>
                 )}
                 <button
                   type="button"
-                  onClick={() => {
-                    URL.revokeObjectURL(p.preview);
-                    setPhotos((l) => l.filter((x) => x.id !== p.id));
-                  }}
-                  className="absolute right-1 top-1 h-7 w-7 rounded-full bg-black/60 text-white"
+                  onClick={() => removePhoto(p)}
+                  className="absolute right-1 top-1 grid h-7 w-7 place-items-center rounded-full bg-black/60 text-white backdrop-blur transition active:scale-90"
                   aria-label="Quitar foto"
                 >
-                  ✕
+                  <Icon name="x" size={14} />
                 </button>
               </div>
             ))}
+            <button
+              type="button"
+              onClick={() => camera.current?.click()}
+              className="flex aspect-square flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-line text-muted transition hover:border-accent hover:text-accent active:scale-95"
+            >
+              <Icon name="camera" size={24} />
+              <span className="text-xs font-medium">Hacer foto</span>
+            </button>
           </div>
-        )}
-      </section>
+          <button type="button" onClick={() => gallery.current?.click()} className={`${secondaryButton} mt-3 w-full py-2.5 text-sm`}>
+            <Icon name="image" size={18} />
+            Añadir desde la galería
+          </button>
+        </Card>
 
-      {error && <p className="text-sm text-red-500">{error}</p>}
+        {error && <Notice tone="danger">{error}</Notice>}
+      </main>
 
-      <div className="fixed inset-x-0 bottom-0 border-t border-neutral-200 bg-background p-4 dark:border-neutral-800">
-        <button
-          onClick={save}
-          disabled={busy || !normalized}
-          className="mx-auto block w-full max-w-xl rounded-xl bg-green-600 px-4 py-4 text-lg font-semibold text-white disabled:opacity-60"
-        >
-          {status || "Guardar evento"}
+      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-line/60 bg-header p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] backdrop-blur-xl">
+        <button onClick={save} disabled={saving || !normalized} className={`${primaryButton} relative mx-auto flex w-full max-w-xl overflow-hidden py-4 text-lg`}>
+          {progress && (
+            <span
+              className="absolute inset-y-0 left-0 bg-white/20 transition-all duration-300"
+              style={{ width: `${(progress.done / progress.total) * 100}%` }}
+            />
+          )}
+          <span className="relative flex items-center gap-2">
+            <Icon name={saving ? "loader" : "check"} />
+            {buttonLabel}
+          </span>
         </button>
       </div>
-    </main>
+    </>
   );
 }
 

@@ -2,35 +2,47 @@
 
 import { useRef, useState } from "react";
 import { compressImage } from "@/lib/image";
-import { readPlate } from "@/lib/ocr";
+import { readPlateFromPhoto } from "@/lib/ocr";
+import { Icon } from "./icons";
+import { LiveScanner } from "./LiveScanner";
+import { primaryButton } from "./ui";
 
-export type ScanResult = { plate: string; valid: boolean; confidence: string; photo: Blob };
+export type ScanResult = { plate: string; photo: Blob };
 
-// Botón que abre la cámara trasera y lee la matrícula en el propio navegador.
+const canUseLiveCamera = () =>
+  typeof navigator !== "undefined" && Boolean(navigator.mediaDevices?.getUserMedia) && window.isSecureContext;
+
+// Botón que abre el escáner en vivo. Si el navegador no permite la cámara en vivo,
+// usa la cámara normal y lee la franja central de la foto.
+// variant "button": botón grande con texto. variant "icon": botón compacto (para el buscador).
 export function PlateScanner({
   onResult,
   label = "Escanear matrícula",
-  className = "",
+  variant = "button",
 }: {
   onResult: (r: ScanResult) => void;
   label?: string;
-  className?: string;
+  variant?: "button" | "icon";
 }) {
   const input = useRef<HTMLInputElement>(null);
+  const [live, setLive] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  async function handle(file: File | undefined) {
+  function open() {
+    setError("");
+    if (canUseLiveCamera()) setLive(true);
+    else input.current?.click();
+  }
+
+  async function handleFile(file: File | undefined) {
     if (!file) return;
     setBusy(true);
-    setError("");
     try {
       const photo = await compressImage(file, 1600, 0.9);
-      const data = await readPlate(photo);
-      if (!data.plate) {
-        throw new Error("No he podido leer la matrícula. Acércate más, con buena luz, o escríbela a mano.");
-      }
-      onResult({ ...data, photo });
+      const found = await readPlateFromPhoto(photo);
+      if (!found) throw new Error("No he podido leer la matrícula. Acércate más o escríbela a mano.");
+      onResult({ plate: found.plate, photo });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -39,26 +51,47 @@ export function PlateScanner({
     }
   }
 
+  const hidden = (
+    <>
+      <input ref={input} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
+      {live && (
+        <LiveScanner
+          onClose={() => setLive(false)}
+          onResult={(r) => {
+            setLive(false);
+            onResult(r);
+          }}
+        />
+      )}
+    </>
+  );
+
+  if (variant === "icon") {
+    return (
+      <>
+        {hidden}
+        <button
+          type="button"
+          disabled={busy}
+          onClick={open}
+          aria-label="Escanear matrícula con la cámara"
+          className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-accent text-accent-fg shadow-sm transition hover:brightness-110 active:scale-95 disabled:opacity-70"
+        >
+          <Icon name={busy ? "loader" : "scan"} size={22} />
+        </button>
+        {error && <p className="animate-fade-up col-span-full mt-1 text-sm text-danger">{error}</p>}
+      </>
+    );
+  }
+
   return (
-    <div className={className}>
-      <input
-        ref={input}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        className="hidden"
-        onChange={(e) => handle(e.target.files?.[0])}
-      />
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => input.current?.click()}
-        className="w-full rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white active:bg-blue-700 disabled:opacity-60"
-      >
-        {busy ? "Leyendo matrícula… (la primera vez tarda más)" : `📷 ${label}`}
+    <div>
+      {hidden}
+      <button type="button" disabled={busy} onClick={open} className={`${primaryButton} w-full py-3.5`}>
+        <Icon name={busy ? "loader" : "scan"} />
+        {busy ? "Leyendo matrícula…" : label}
       </button>
-      <p className="mt-1 text-xs text-neutral-500">Encuadra solo la matrícula, que ocupe casi todo el ancho.</p>
-      {error && <p className="mt-2 text-sm text-red-500">{error}</p>}
+      {error && <p className="animate-fade-up mt-2 text-center text-sm text-danger">{error}</p>}
     </div>
   );
 }

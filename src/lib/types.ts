@@ -16,4 +16,6 @@ export type PlateSummary = {
   plate: string;
   events: number;
   last: string;
+  lastDescription: string;
+  thumb: string | null;
 };

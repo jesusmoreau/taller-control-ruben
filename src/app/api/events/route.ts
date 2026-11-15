@@ -50,20 +50,49 @@ export async function GET(request: Request) {
   const q = normalizePlate(params.get("q") ?? "");
   let query = db
     .from("events")
-    .select("plate, occurred_at")
+    .select("plate, occurred_at, description, photos(path, kind)")
     .order("occurred_at", { ascending: false })
-    .limit(500);
+    .limit(400);
   if (q) query = query.ilike("plate", `%${q}%`);
-  const { data, error } = await query;
+  const { data, error } = await query.returns<
+    { plate: string; occurred_at: string; description: string; photos: { path: string; kind: string }[] }[]
+  >();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  const map = new Map<string, PlateSummary>();
+  // Resumen por matrícula: nº de eventos, último evento y una miniatura
+  // (la foto del coche más reciente; si no hay, la de la matrícula).
+  const map = new Map<string, PlateSummary & { thumbPath: string | null }>();
   for (const row of data) {
+    const photo = row.photos.find((p) => p.kind === "car") ?? row.photos[0];
     const s = map.get(row.plate);
-    if (s) s.events++;
-    else map.set(row.plate, { plate: row.plate, events: 1, last: row.occurred_at });
+    if (s) {
+      s.events++;
+      if (!s.thumbPath && photo) s.thumbPath = photo.path;
+    } else {
+      map.set(row.plate, {
+        plate: row.plate,
+        events: 1,
+        last: row.occurred_at,
+        lastDescription: row.description,
+        thumb: null,
+        thumbPath: photo?.path ?? null,
+      });
+    }
   }
-  return NextResponse.json({ plates: [...map.values()].slice(0, 50) });
+  const list = [...map.values()].slice(0, 50);
+
+  const paths = list.map((s) => s.thumbPath).filter((p): p is string => Boolean(p));
+  const urls = new Map<string, string>();
+  if (paths.length) {
+    const { data: signed } = await db.storage.from(BUCKET).createSignedUrls(paths, 60 * 60);
+    signed?.forEach((s) => s.path && s.signedUrl && urls.set(s.path, s.signedUrl));
+  }
+
+  const plates: PlateSummary[] = list.map(({ thumbPath, ...s }) => ({
+    ...s,
+    thumb: thumbPath ? (urls.get(thumbPath) ?? null) : null,
+  }));
+  return NextResponse.json({ plates });
 }
 
 // POST /api/events { plate, occurredAt, description, photos: [{ path, kind }] }
