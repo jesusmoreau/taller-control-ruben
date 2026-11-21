@@ -79,6 +79,12 @@ const paths = {
       <path d="M12 7v5l3 2" />
     </>
   ),
+  calendar: (
+    <>
+      <rect x="3" y="4" width="18" height="18" rx="2" />
+      <path d="M16 2v4M8 2v4M3 10h18" />
+    </>
+  ),
   check: <path d="M20 6 9 17l-5-5" />,
   logout: (
     <>

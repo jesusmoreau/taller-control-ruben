@@ -15,6 +15,14 @@ async function statusesFor(db: ReturnType<typeof supabaseAdmin>, plates: string[
   return map;
 }
 
+// Todos los coches con el semáforo puesto (son pocos: los que están en curso en el taller).
+async function activeStatuses(db: ReturnType<typeof supabaseAdmin>) {
+  const map = new Map<string, WorkStatus>();
+  const { data } = await db.from("cars").select("plate, status").not("status", "is", null);
+  data?.forEach((c) => isStatus(c.status) && map.set(c.plate, c.status));
+  return map;
+}
+
 type PhotoRow = { id: string; path: string; kind: "plate" | "car" };
 type AudioRow = { id: string; path: string; duration_ms: number; mime: string };
 type EventRow = {
@@ -104,7 +112,10 @@ export async function GET(request: Request) {
       });
     }
   }
-  const list = [...map.values()].slice(0, 50);
+  // Los 50 más recientes, más cualquier coche que esté en el taller o tenga el semáforo
+  // puesto, para que los filtros de la lista no se dejen ninguno.
+  const statuses = await activeStatuses(db);
+  const list = [...map.values()].filter((s, i) => i < 50 || s.insideSince || statuses.has(s.plate));
 
   const paths = list.map((s) => s.thumbPath).filter((p): p is string => Boolean(p));
   const urls = new Map<string, string>();
@@ -113,7 +124,6 @@ export async function GET(request: Request) {
     signed?.forEach((s) => s.path && s.signedUrl && urls.set(s.path, s.signedUrl));
   }
 
-  const statuses = await statusesFor(db, list.map((s) => s.plate));
   const plates: PlateSummary[] = list.map(({ thumbPath, ...s }) => ({
     ...s,
     status: statuses.get(s.plate) ?? null,

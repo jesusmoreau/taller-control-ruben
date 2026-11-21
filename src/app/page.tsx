@@ -9,6 +9,7 @@ import { PlateScanner } from "@/components/PlateScanner";
 import { TrafficLightCompact } from "@/components/TrafficLight";
 import { Header, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { formatPlate, normalizePlate } from "@/lib/plate";
+import { STATUSES, STATUS_INFO, type WorkStatus } from "@/lib/status";
 import { formatDuration } from "@/lib/tags";
 import { timeAgo } from "@/lib/time";
 import { useNow } from "@/lib/useNow";
@@ -33,13 +34,28 @@ export default function Home() {
     };
   }, [query]);
 
-  const [onlyInside, setOnlyInside] = useState(false);
+  // Filtros: dónde está el coche y color del semáforo. Se recuerdan en la sesión
+  // para que sigan puestos al volver de la ficha de un coche.
+  // (Solo se pintan cuando ya han llegado los datos, así que leerlos al iniciar no descuadra la hidratación.)
+  const [onlyInside, setOnlyInside] = useState(() => readFilters()?.onlyInside ?? false);
+  const [color, setColor] = useState<ColorFilter>(() => readFilters()?.color ?? null);
+  useEffect(() => saveFilters({ onlyInside, color }), [onlyInside, color]);
+
   const now = useNow();
   const loading = !result || result.q !== query;
   const allPlates = result?.plates ?? [];
   const insideCount = allPlates.filter((p) => p.insideSince).length;
   const showInside = onlyInside && insideCount > 0;
-  const plates = showInside ? allPlates.filter((p) => p.insideSince) : allPlates;
+  const located = showInside ? allPlates.filter((p) => p.insideSince) : allPlates;
+  const colorCount = (c: Exclude<ColorFilter, null>) =>
+    located.filter((p) => (c === "none" ? !p.status : p.status === c)).length;
+  const plates = color ? located.filter((p) => (color === "none" ? !p.status : p.status === color)) : located;
+  const filtered = showInside || color !== null;
+
+  // Al tocar un semáforo de la lista, actualizar el resumen para que filtros y contadores cuadren.
+  function setPlateStatus(plate: string, status: WorkStatus | null) {
+    setResult((r) => r && { ...r, plates: r.plates.map((p) => (p.plate === plate ? { ...p, status } : p)) });
+  }
 
   async function logout() {
     await fetch("/api/logout", { method: "POST" });
@@ -58,6 +74,15 @@ export default function Home() {
           </span>
         }
         actions={
+          <>
+          <Link
+            href="/reporte"
+            aria-label="Reporte del día"
+            title="Reporte del día"
+            className="grid h-10 w-10 place-items-center rounded-full text-muted transition hover:bg-surface-2 hover:text-fg active:scale-95"
+          >
+            <Icon name="calendar" size={18} />
+          </Link>
           <button
             onClick={logout}
             aria-label="Cerrar sesión"
@@ -66,6 +91,7 @@ export default function Home() {
           >
             <Icon name="logout" size={18} />
           </button>
+          </>
         }
       />
 
@@ -132,6 +158,33 @@ export default function Home() {
             </div>
           )}
 
+          {allPlates.length > 0 && (
+            <div
+              role="group"
+              aria-label="Filtrar por semáforo"
+              className="-mx-4 -mt-1 mb-3 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none]"
+            >
+              {[...STATUSES, "none" as const].map((c) => {
+                const on = color === c;
+                const n = colorCount(c);
+                return (
+                  <button
+                    key={c}
+                    onClick={() => setColor(on ? null : c)}
+                    aria-pressed={on}
+                    className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition active:scale-95 ${
+                      on ? "border-fg bg-fg text-bg" : "border-line bg-surface text-fg hover:border-accent/40"
+                    } ${n === 0 && !on ? "opacity-50" : ""}`}
+                  >
+                    <span className={`h-2.5 w-2.5 rounded-full ${CHIP_DOT[c]}`} />
+                    {c === "none" ? "Sin estado" : STATUS_INFO[c].label}
+                    <span className={`tabular-nums ${on ? "text-bg/70" : "text-muted"}`}>{n}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           {loading && plates.length === 0 && (
             <div className="flex flex-col gap-2">
               {[0, 1, 2].map((i) => (
@@ -140,7 +193,22 @@ export default function Home() {
             </div>
           )}
 
-          {!loading && plates.length === 0 && (
+          {!loading && plates.length === 0 && filtered && allPlates.length > 0 && (
+            <div className="animate-fade-up flex flex-col items-center rounded-2xl border border-dashed border-line px-6 py-10 text-center">
+              <p className="font-medium">Ningún coche con este filtro</p>
+              <button
+                onClick={() => {
+                  setOnlyInside(false);
+                  setColor(null);
+                }}
+                className="mt-3 text-sm font-semibold text-accent"
+              >
+                Quitar filtros
+              </button>
+            </div>
+          )}
+
+          {!loading && plates.length === 0 && !(filtered && allPlates.length > 0) && (
             <div className="animate-fade-up flex flex-col items-center rounded-2xl border border-dashed border-line px-6 py-10 text-center">
               <div className="mb-3 grid h-12 w-12 place-items-center rounded-full bg-surface-2 text-muted">
                 <Icon name={query ? "search" : "car"} />
@@ -202,7 +270,12 @@ export default function Home() {
                   </div>
                 </Link>
                 {/* key con el estado: si llega un valor nuevo del servidor, el semáforo se reinicia con él */}
-                <TrafficLightCompact key={p.status ?? "none"} plate={p.plate} status={p.status} />
+                <TrafficLightCompact
+                  key={p.status ?? "none"}
+                  plate={p.plate}
+                  status={p.status}
+                  onChange={(s) => setPlateStatus(p.plate, s)}
+                />
               </li>
             ))}
           </ul>
@@ -218,4 +291,32 @@ export default function Home() {
       </Link>
     </>
   );
+}
+
+type ColorFilter = WorkStatus | "none" | null;
+
+const CHIP_DOT: Record<Exclude<ColorFilter, null>, string> = {
+  red: "bg-signal-red",
+  yellow: "bg-signal-yellow",
+  green: "bg-signal-green",
+  none: "border border-muted/60",
+};
+
+const FILTERS_KEY = "filtros-inicio";
+
+function readFilters(): { onlyInside: boolean; color: ColorFilter } | null {
+  try {
+    const v = JSON.parse(sessionStorage.getItem(FILTERS_KEY) ?? "null");
+    if (!v) return null;
+    const color = [...STATUSES, "none"].includes(v.color) ? v.color : null;
+    return { onlyInside: v.onlyInside === true, color };
+  } catch {
+    return null;
+  }
+}
+
+function saveFilters(v: { onlyInside: boolean; color: ColorFilter }) {
+  try {
+    sessionStorage.setItem(FILTERS_KEY, JSON.stringify(v));
+  } catch {}
 }
