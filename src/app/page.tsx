@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { Icon } from "@/components/icons";
 import { PlateBadge } from "@/components/PlateBadge";
 import { PlateScanner } from "@/components/PlateScanner";
+import { TrafficLightCompact } from "@/components/TrafficLight";
 import { Header, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { formatPlate, normalizePlate } from "@/lib/plate";
 import { formatDuration } from "@/lib/tags";
@@ -163,10 +164,14 @@ export default function Home() {
 
           <ul className={`flex flex-col gap-2 transition-opacity ${loading && plates.length ? "opacity-60" : ""}`}>
             {plates.map((p, i) => (
-              <li key={p.plate} className="animate-fade-up" style={{ animationDelay: `${Math.min(i, 8) * 30}ms` }}>
+              <li
+                key={p.plate}
+                className="animate-fade-up flex overflow-hidden rounded-2xl border border-line bg-surface shadow-card transition hover:border-accent/40"
+                style={{ animationDelay: `${Math.min(i, 8) * 30}ms` }}
+              >
                 <Link
                   href={`/coche/${p.plate}`}
-                  className="flex items-center gap-3 rounded-2xl border border-line bg-surface p-3 shadow-card transition hover:border-accent/40 active:scale-[0.99]"
+                  className="flex min-w-0 flex-1 items-center gap-3 p-3 transition active:bg-surface-2/60"
                 >
                   <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-surface-2">
                     {p.thumb ? (
@@ -196,6 +201,8 @@ export default function Home() {
                     </div>
                   </div>
                 </Link>
+                {/* key con el estado: si llega un valor nuevo del servidor, el semáforo se reinicia con él */}
+                <TrafficLightCompact key={p.status ?? "none"} plate={p.plate} status={p.status} />
               </li>
             ))}
           </ul>

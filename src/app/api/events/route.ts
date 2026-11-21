@@ -2,7 +2,18 @@ import { NextResponse } from "next/server";
 import { BUCKET, supabaseAdmin } from "@/lib/supabase-server";
 import { normalizePlate } from "@/lib/plate";
 import { computeStays } from "@/lib/tags";
+import { isStatus, type WorkStatus } from "@/lib/status";
 import type { CarEvent, PlateSummary } from "@/lib/types";
+
+// Semáforo de cada matrícula. Si la tabla "cars" aún no existe, devuelve un mapa vacío
+// para que la app siga funcionando sin el semáforo.
+async function statusesFor(db: ReturnType<typeof supabaseAdmin>, plates: string[]) {
+  const map = new Map<string, WorkStatus>();
+  if (!plates.length) return map;
+  const { data } = await db.from("cars").select("plate, status").in("plate", plates);
+  data?.forEach((c) => isStatus(c.status) && map.set(c.plate, c.status));
+  return map;
+}
 
 type PhotoRow = { id: string; path: string; kind: "plate" | "car" };
 type AudioRow = { id: string; path: string; duration_ms: number; mime: string };
@@ -48,7 +59,9 @@ export async function GET(request: Request) {
         .map((p) => ({ id: p.id, kind: p.kind, url: urls.get(p.path) ?? "" })),
       audios: e.audios.map((a) => ({ id: a.id, url: urls.get(a.path) ?? "", durationMs: a.duration_ms, mime: a.mime })),
     }));
-    return NextResponse.json({ events });
+    const p = normalizePlate(plate);
+    const status = (await statusesFor(db, [p])).get(p) ?? null;
+    return NextResponse.json({ events, status });
   }
 
   const q = normalizePlate(params.get("q") ?? "");
@@ -87,6 +100,7 @@ export async function GET(request: Request) {
         thumb: null,
         thumbPath: photo?.path ?? null,
         insideSince: computeStays(byPlate.get(row.plate) ?? []).openSince,
+        status: null,
       });
     }
   }
@@ -99,8 +113,10 @@ export async function GET(request: Request) {
     signed?.forEach((s) => s.path && s.signedUrl && urls.set(s.path, s.signedUrl));
   }
 
+  const statuses = await statusesFor(db, list.map((s) => s.plate));
   const plates: PlateSummary[] = list.map(({ thumbPath, ...s }) => ({
     ...s,
+    status: statuses.get(s.plate) ?? null,
     thumb: thumbPath ? (urls.get(thumbPath) ?? null) : null,
   }));
   return NextResponse.json({ plates });
@@ -119,6 +135,12 @@ export async function POST(request: Request) {
   if (!plate) return NextResponse.json({ error: "Falta la matrícula" }, { status: 400 });
 
   const db = supabaseAdmin();
+  // Cada evento pertenece a un coche: si es la primera vez que entra, se crea su ficha.
+  const { error: carError } = await db
+    .from("cars")
+    .upsert({ plate }, { onConflict: "plate", ignoreDuplicates: true });
+  if (carError) return NextResponse.json({ error: carError.message }, { status: 500 });
+
   const { data: event, error } = await db
     .from("events")
     .insert({

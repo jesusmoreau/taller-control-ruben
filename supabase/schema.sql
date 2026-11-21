@@ -41,3 +41,25 @@ create table if not exists public.audios (
 
 create index if not exists audios_event_idx on public.audios (event_id);
 alter table public.audios enable row level security;
+
+-- Coche: una fila por matrícula. Guarda lo que es del coche y no de un evento,
+-- como el semáforo de trabajo (red = bloqueado, yellow = listo para empezar, green = en curso).
+create table if not exists public.cars (
+  plate      text primary key,               -- normalizada: 1234BCD
+  status     text check (status in ('red', 'yellow', 'green')),
+  status_at  timestamptz,
+  created_at timestamptz not null default now()
+);
+alter table public.cars enable row level security;
+
+-- Migración de una base existente: crear el coche de cada matrícula con eventos
+-- y exigir que cada evento pertenezca a un coche.
+insert into public.cars (plate, created_at)
+select plate, min(occurred_at) from public.events group by plate
+on conflict (plate) do nothing;
+
+do $$ begin
+  alter table public.events
+    add constraint events_plate_fkey foreign key (plate) references public.cars (plate);
+exception when duplicate_object then null;
+end $$;

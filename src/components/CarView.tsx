@@ -7,11 +7,13 @@ import { AudioPlayer } from "@/components/AudioPlayer";
 import { Icon } from "@/components/icons";
 import { Lightbox } from "@/components/Lightbox";
 import { PlateBadge } from "@/components/PlateBadge";
+import { TrafficLight } from "@/components/TrafficLight";
 import { Header, Notice, Skeleton, Toast } from "@/components/ui";
 import { normalizePlate } from "@/lib/plate";
 import { computeStays, formatDuration, splitTag } from "@/lib/tags";
 import { formatDate, formatDateTime, timeAgo } from "@/lib/time";
 import { useNow } from "@/lib/useNow";
+import type { WorkStatus } from "@/lib/status";
 import type { CarEvent } from "@/lib/types";
 
 const TAG_STYLE: Record<string, string> = {
@@ -29,6 +31,7 @@ export function CarView({ plate: rawPlate }: { plate: string }) {
   const pathname = usePathname();
   const params = useSearchParams();
   const [events, setEvents] = useState<CarEvent[] | null>(null);
+  const [status, setStatus] = useState<WorkStatus | null>(null);
   const [error, setError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
@@ -48,7 +51,10 @@ export function CarView({ plate: rawPlate }: { plate: string }) {
       .then(({ ok, data }) => {
         if (cancelled) return;
         if (!ok) setError(data.error ?? "Error cargando eventos");
-        else setEvents(data.events);
+        else {
+          setEvents(data.events);
+          setStatus(data.status ?? null);
+        }
       });
     return () => {
       cancelled = true;
@@ -80,6 +86,12 @@ export function CarView({ plate: rawPlate }: { plate: string }) {
         <section className="animate-fade-up flex flex-col items-center gap-4 text-center">
           <PlateBadge plate={plate} size="lg" />
           {first && <p className="-mt-2 text-xs text-muted">Primer registro: {formatDate(first)}</p>}
+
+          {events ? (
+            <TrafficLight key={status ?? "none"} plate={plate} status={status} />
+          ) : (
+            !error && <Skeleton className="h-[106px] w-full" />
+          )}
 
           {stays?.openSince && (
             <div className="animate-fade-up flex w-full items-center gap-3 rounded-2xl border border-success/30 bg-success-soft px-4 py-3 text-left">
