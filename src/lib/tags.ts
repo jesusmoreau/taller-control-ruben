@@ -4,8 +4,28 @@ export const TAGS = ["Llegada", "Salida", "Daños", "Reparación", "Revisión", 
 export type Tag = (typeof TAGS)[number];
 
 export const ENTRY_TAG: Tag = "Llegada";
-/** A partir de aquí, un coche en el taller salta como alarma. */
-export const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+/** Días laborables (lunes a viernes) seguidos en el taller a partir de los cuales salta la alarma. */
+export const ALARM_WORKDAYS = 5;
+
+/** Días laborables transcurridos desde la entrada: cuenta de lunes a viernes, desde el día siguiente hasta hoy. */
+export function workdaysSince(iso: string, now = Date.now()): number {
+  const day = new Date(iso);
+  day.setHours(0, 0, 0, 0);
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  let n = 0;
+  while (day < today) {
+    day.setDate(day.getDate() + 1);
+    const wd = day.getDay();
+    if (wd !== 0 && wd !== 6) n++;
+  }
+  return n;
+}
+
+/** Un coche que entró el lunes salta el lunes siguiente; los fines de semana no cuentan. */
+export function isOverdue(insideSince: string | null, now = Date.now()): boolean {
+  return Boolean(insideSince && workdaysSince(insideSince, now) >= ALARM_WORKDAYS);
+}
 
 export const EXIT_TAGS: readonly Tag[] = ["Salida", "Entrega al cliente"];
 

@@ -10,7 +10,7 @@ import { TrafficLightCompact, type LightState } from "@/components/TrafficLight"
 import { Header, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { formatPlate, normalizePlate } from "@/lib/plate";
 import { STATUSES, STATUS_INFO, type WorkStatus } from "@/lib/status";
-import { WEEK_MS, formatDuration } from "@/lib/tags";
+import { ALARM_WORKDAYS, formatDuration, workdaysSince } from "@/lib/tags";
 import { timeAgo } from "@/lib/time";
 import { useNow } from "@/lib/useNow";
 import type { PlateSummary } from "@/lib/types";
@@ -44,18 +44,19 @@ export default function Home() {
   const now = useNow();
   const loading = !result || result.q !== query;
   const allPlates = result?.plates ?? [];
-  const isOverWeek = (p: PlateSummary) => Boolean(p.insideSince && now - new Date(p.insideSince).getTime() > WEEK_MS);
+  // Días laborables (lun-vie) que lleva en el taller; -1 si no está dentro.
+  const daysIn = (p: PlateSummary) => (p.insideSince ? workdaysSince(p.insideSince, now) : -1);
   const insideCount = allPlates.filter((p) => p.insideSince).length;
-  const weekCount = allPlates.filter(isOverWeek).length;
+  const dayCount = (min: number) => allPlates.filter((p) => daysIn(p) >= min).length;
   // Si el filtro guardado ya no tiene coches (p. ej. ninguno pasa de la semana), se muestran todos.
-  const activePlace: Place =
-    place === "week" && weekCount ? "week" : place !== "all" && insideCount ? "inside" : "all";
+  // Si ya no hay ningún coche dentro, el filtro guardado deja de aplicarse.
+  const activePlace: Place = place !== "all" && insideCount ? place : "all";
   const located =
-    activePlace === "week"
-      ? allPlates.filter(isOverWeek)
+    activePlace === "all"
+      ? allPlates
       : activePlace === "inside"
         ? allPlates.filter((p) => p.insideSince)
-        : allPlates;
+        : allPlates.filter((p) => daysIn(p) >= DAY_FILTERS[activePlace]);
   const colorCount = (c: Exclude<ColorFilter, null>) =>
     located.filter((p) => (c === "none" ? !p.status : p.status === c)).length;
   const plates = color ? located.filter((p) => (color === "none" ? !p.status : p.status === color)) : located;
@@ -164,7 +165,10 @@ export default function Home() {
                 [
                   { id: "all", label: "Todos" },
                   { id: "inside", label: `En el taller · ${insideCount}` },
-                  ...(weekCount ? [{ id: "week", label: `+1 semana · ${weekCount}` }] : []),
+                  ...(Object.keys(DAY_FILTERS) as DayPlace[]).map((id) => ({
+                    id,
+                    label: `${DAY_FILTERS[id]}+ días · ${dayCount(DAY_FILTERS[id])}`,
+                  })),
                 ] as { id: Place; label: string }[]
               ).map((f) => (
                 <button
@@ -172,15 +176,31 @@ export default function Home() {
                   onClick={() => setPlace(f.id)}
                   aria-pressed={activePlace === f.id}
                   className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition active:scale-95 ${
-                    activePlace === f.id && f.id === "week"
-                      ? "border-danger bg-danger text-white"
+                    f.id in DAY_FILTERS && activePlace !== f.id && !dayCount(DAY_FILTERS[f.id as DayPlace]) ? "opacity-50 " : ""
+                  }${
+                    activePlace === f.id && f.id in DAY_FILTERS
+                      ? DAY_FILTERS[f.id as DayPlace] >= ALARM_WORKDAYS
+                        ? "border-danger bg-danger text-white"
+                        : "border-warn bg-warn text-white"
                       : activePlace === f.id
                       ? "border-accent bg-accent text-accent-fg"
                       : "border-line bg-surface text-fg hover:border-accent/40"
                   }`}
                 >
                   {f.id === "inside" && <span className="h-2 w-2 rounded-full bg-success" />}
-                  {f.id === "week" && <Icon name="alert" size={14} className={activePlace === "week" ? "" : "text-danger"} />}
+                  {f.id in DAY_FILTERS && (
+                    <Icon
+                      name={DAY_FILTERS[f.id as DayPlace] >= ALARM_WORKDAYS ? "alert" : "clock"}
+                      size={14}
+                      className={
+                        activePlace === f.id
+                          ? ""
+                          : DAY_FILTERS[f.id as DayPlace] >= ALARM_WORKDAYS
+                            ? "text-danger"
+                            : "text-warn"
+                      }
+                    />
+                  )}
                   {f.label}
                 </button>
               ))}
@@ -292,9 +312,14 @@ export default function Home() {
                     )}
                   </div>
                   <div className="flex shrink-0 flex-col items-end gap-1 text-right text-xs text-muted">
-                    {p.insideSince && isOverWeek(p) ? (
+                    {p.insideSince && daysIn(p) >= ALARM_WORKDAYS ? (
                       <div className="inline-flex items-center gap-1 rounded-full bg-danger px-2 py-0.5 font-semibold text-white">
                         <Icon name="alert" size={12} />
+                        {formatDuration(now - new Date(p.insideSince).getTime())}
+                      </div>
+                    ) : p.insideSince && daysIn(p) >= 3 ? (
+                      <div className="inline-flex items-center gap-1 rounded-full bg-warn-soft px-2 py-0.5 font-semibold text-warn">
+                        <Icon name="clock" size={12} />
                         {formatDuration(now - new Date(p.insideSince).getTime())}
                       </div>
                     ) : p.insideSince ? (
@@ -345,14 +370,17 @@ const CHIP_DOT: Record<Exclude<ColorFilter, null>, string> = {
 
 const FILTERS_KEY = "filtros-inicio";
 
-type Place = "all" | "inside" | "week";
+// Filtros por días laborables en el taller (al menos N días, de lunes a viernes).
+const DAY_FILTERS = { d3: 3, d5: 5, d7: 7 } as const;
+type DayPlace = keyof typeof DAY_FILTERS;
+type Place = "all" | "inside" | DayPlace;
 
 function readFilters(): { place: Place; color: ColorFilter } | null {
   try {
     const v = JSON.parse(sessionStorage.getItem(FILTERS_KEY) ?? "null");
     if (!v) return null;
     const color = [...STATUSES, "none"].includes(v.color) ? v.color : null;
-    const place = ["inside", "week"].includes(v.place) ? v.place : v.onlyInside === true ? "inside" : "all";
+    const place = ["inside", "d3", "d5", "d7"].includes(v.place) ? v.place : v.onlyInside === true ? "inside" : "all";
     return { place, color };
   } catch {
     return null;

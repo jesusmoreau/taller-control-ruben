@@ -10,7 +10,7 @@ import { PlateBadge } from "@/components/PlateBadge";
 import { TrafficLight } from "@/components/TrafficLight";
 import { Header, Notice, Skeleton, Toast } from "@/components/ui";
 import { normalizePlate } from "@/lib/plate";
-import { WEEK_MS, computeStays, formatDuration, splitTag } from "@/lib/tags";
+import { computeStays, formatDuration, isOverdue, splitTag, workdaysSince } from "@/lib/tags";
 import { formatDate, formatDateTime, timeAgo } from "@/lib/time";
 import { useNow } from "@/lib/useNow";
 import { CarDataCard } from "@/components/CarData";
@@ -84,7 +84,7 @@ export function CarView({ plate: rawPlate }: { plate: string }) {
   const first = events?.length ? events[events.length - 1].occurred_at : null;
   const now = useNow();
   const stays = events ? computeStays(events, now) : null;
-  const overWeek = Boolean(stays?.openSince && now - new Date(stays.openSince).getTime() > WEEK_MS);
+  const overWeek = isOverdue(stays?.openSince ?? null, now);
 
   return (
     <>
@@ -109,7 +109,9 @@ export function CarView({ plate: rawPlate }: { plate: string }) {
             <div className="animate-fade-up flex w-full items-center gap-3 rounded-2xl border border-danger/40 bg-danger-soft px-4 py-3 text-left">
               <Icon name="alert" size={20} className="shrink-0 text-danger" />
               <div className="min-w-0 flex-1">
-                <p className="font-semibold text-danger">Más de una semana en el taller</p>
+                <p className="font-semibold text-danger">
+                  {workdaysSince(stays.openSince, now)} días laborables en el taller
+                </p>
                 <p className="text-sm text-fg/80">
                   Lleva {formatDuration(now - new Date(stays.openSince).getTime())} · entró el{" "}
                   {formatDateTime(stays.openSince)}
