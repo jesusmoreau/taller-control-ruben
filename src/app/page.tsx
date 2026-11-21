@@ -6,11 +6,11 @@ import { useEffect, useState } from "react";
 import { Icon } from "@/components/icons";
 import { PlateBadge } from "@/components/PlateBadge";
 import { PlateScanner } from "@/components/PlateScanner";
-import { TrafficLightCompact } from "@/components/TrafficLight";
+import { TrafficLightCompact, type LightState } from "@/components/TrafficLight";
 import { Header, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { formatPlate, normalizePlate } from "@/lib/plate";
 import { STATUSES, STATUS_INFO, type WorkStatus } from "@/lib/status";
-import { formatDuration } from "@/lib/tags";
+import { WEEK_MS, formatDuration } from "@/lib/tags";
 import { timeAgo } from "@/lib/time";
 import { useNow } from "@/lib/useNow";
 import type { PlateSummary } from "@/lib/types";
@@ -37,24 +37,39 @@ export default function Home() {
   // Filtros: dónde está el coche y color del semáforo. Se recuerdan en la sesión
   // para que sigan puestos al volver de la ficha de un coche.
   // (Solo se pintan cuando ya han llegado los datos, así que leerlos al iniciar no descuadra la hidratación.)
-  const [onlyInside, setOnlyInside] = useState(() => readFilters()?.onlyInside ?? false);
+  const [place, setPlace] = useState<Place>(() => readFilters()?.place ?? "all");
   const [color, setColor] = useState<ColorFilter>(() => readFilters()?.color ?? null);
-  useEffect(() => saveFilters({ onlyInside, color }), [onlyInside, color]);
+  useEffect(() => saveFilters({ place, color }), [place, color]);
 
   const now = useNow();
   const loading = !result || result.q !== query;
   const allPlates = result?.plates ?? [];
+  const isOverWeek = (p: PlateSummary) => Boolean(p.insideSince && now - new Date(p.insideSince).getTime() > WEEK_MS);
   const insideCount = allPlates.filter((p) => p.insideSince).length;
-  const showInside = onlyInside && insideCount > 0;
-  const located = showInside ? allPlates.filter((p) => p.insideSince) : allPlates;
+  const weekCount = allPlates.filter(isOverWeek).length;
+  // Si el filtro guardado ya no tiene coches (p. ej. ninguno pasa de la semana), se muestran todos.
+  const activePlace: Place =
+    place === "week" && weekCount ? "week" : place !== "all" && insideCount ? "inside" : "all";
+  const located =
+    activePlace === "week"
+      ? allPlates.filter(isOverWeek)
+      : activePlace === "inside"
+        ? allPlates.filter((p) => p.insideSince)
+        : allPlates;
   const colorCount = (c: Exclude<ColorFilter, null>) =>
     located.filter((p) => (c === "none" ? !p.status : p.status === c)).length;
   const plates = color ? located.filter((p) => (color === "none" ? !p.status : p.status === color)) : located;
-  const filtered = showInside || color !== null;
+  const filtered = activePlace !== "all" || color !== null;
 
   // Al tocar un semáforo de la lista, actualizar el resumen para que filtros y contadores cuadren.
-  function setPlateStatus(plate: string, status: WorkStatus | null) {
-    setResult((r) => r && { ...r, plates: r.plates.map((p) => (p.plate === plate ? { ...p, status } : p)) });
+  function setPlateLight(plate: string, s: LightState) {
+    setResult(
+      (r) =>
+        r && {
+          ...r,
+          plates: r.plates.map((p) => (p.plate === plate ? { ...p, status: s.status, blockedReason: s.blockedReason } : p)),
+        },
+    );
   }
 
   async function logout() {
@@ -82,6 +97,14 @@ export default function Home() {
             className="grid h-10 w-10 place-items-center rounded-full text-muted transition hover:bg-surface-2 hover:text-fg active:scale-95"
           >
             <Icon name="calendar" size={18} />
+          </Link>
+          <Link
+            href="/trabajo"
+            aria-label="Trabajo sin coche"
+            title="Trabajo sin coche"
+            className="grid h-10 w-10 place-items-center rounded-full text-muted transition hover:bg-surface-2 hover:text-fg active:scale-95"
+          >
+            <Icon name="clock" size={18} />
           </Link>
           <button
             onClick={logout}
@@ -136,22 +159,28 @@ export default function Home() {
           </SectionTitle>
 
           {insideCount > 0 && (
-            <div className="-mt-1 mb-3 flex gap-2">
-              {[
-                { on: false, label: "Todos" },
-                { on: true, label: `En el taller · ${insideCount}` },
-              ].map((f) => (
+            <div className="-mx-4 -mt-1 mb-3 flex gap-2 overflow-x-auto px-4 [scrollbar-width:none]">
+              {(
+                [
+                  { id: "all", label: "Todos" },
+                  { id: "inside", label: `En el taller · ${insideCount}` },
+                  ...(weekCount ? [{ id: "week", label: `+1 semana · ${weekCount}` }] : []),
+                ] as { id: Place; label: string }[]
+              ).map((f) => (
                 <button
-                  key={f.label}
-                  onClick={() => setOnlyInside(f.on)}
-                  aria-pressed={showInside === f.on}
-                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition active:scale-95 ${
-                    showInside === f.on
+                  key={f.id}
+                  onClick={() => setPlace(f.id)}
+                  aria-pressed={activePlace === f.id}
+                  className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition active:scale-95 ${
+                    activePlace === f.id && f.id === "week"
+                      ? "border-danger bg-danger text-white"
+                      : activePlace === f.id
                       ? "border-accent bg-accent text-accent-fg"
                       : "border-line bg-surface text-fg hover:border-accent/40"
                   }`}
                 >
-                  {f.on && <span className="h-2 w-2 rounded-full bg-success" />}
+                  {f.id === "inside" && <span className="h-2 w-2 rounded-full bg-success" />}
+                  {f.id === "week" && <Icon name="alert" size={14} className={activePlace === "week" ? "" : "text-danger"} />}
                   {f.label}
                 </button>
               ))}
@@ -198,7 +227,7 @@ export default function Home() {
               <p className="font-medium">Ningún coche con este filtro</p>
               <button
                 onClick={() => {
-                  setOnlyInside(false);
+                  setPlace("all");
                   setColor(null);
                 }}
                 className="mt-3 text-sm font-semibold text-accent"
@@ -253,10 +282,22 @@ export default function Home() {
                   </div>
                   <div className="min-w-0 flex-1">
                     <PlateBadge plate={p.plate} size="sm" />
-                    <p className="mt-1 truncate text-sm text-muted">{p.lastDescription || "Sin descripción"}</p>
+                    {(p.make || p.model) && (
+                      <p className="mt-1 truncate text-sm font-medium">{[p.make, p.model].filter(Boolean).join(" ")}</p>
+                    )}
+                    {p.status === "red" && p.blockedReason ? (
+                      <p className="mt-0.5 truncate text-sm font-semibold text-signal-red">{p.blockedReason}</p>
+                    ) : (
+                      <p className="mt-0.5 truncate text-sm text-muted">{p.lastDescription || "Sin descripción"}</p>
+                    )}
                   </div>
                   <div className="flex shrink-0 flex-col items-end gap-1 text-right text-xs text-muted">
-                    {p.insideSince ? (
+                    {p.insideSince && isOverWeek(p) ? (
+                      <div className="inline-flex items-center gap-1 rounded-full bg-danger px-2 py-0.5 font-semibold text-white">
+                        <Icon name="alert" size={12} />
+                        {formatDuration(now - new Date(p.insideSince).getTime())}
+                      </div>
+                    ) : p.insideSince ? (
                       <div className="inline-flex items-center gap-1 rounded-full bg-success-soft px-2 py-0.5 font-semibold text-success">
                         <span className="h-1.5 w-1.5 rounded-full bg-success" />
                         {formatDuration(now - new Date(p.insideSince).getTime())}
@@ -271,10 +312,10 @@ export default function Home() {
                 </Link>
                 {/* key con el estado: si llega un valor nuevo del servidor, el semáforo se reinicia con él */}
                 <TrafficLightCompact
-                  key={p.status ?? "none"}
+                  key={`${p.status}-${p.blockedReason}`}
                   plate={p.plate}
-                  status={p.status}
-                  onChange={(s) => setPlateStatus(p.plate, s)}
+                  initial={{ status: p.status, blockedReason: p.blockedReason, blockedNote: null }}
+                  onChange={(s) => setPlateLight(p.plate, s)}
                 />
               </li>
             ))}
@@ -304,18 +345,21 @@ const CHIP_DOT: Record<Exclude<ColorFilter, null>, string> = {
 
 const FILTERS_KEY = "filtros-inicio";
 
-function readFilters(): { onlyInside: boolean; color: ColorFilter } | null {
+type Place = "all" | "inside" | "week";
+
+function readFilters(): { place: Place; color: ColorFilter } | null {
   try {
     const v = JSON.parse(sessionStorage.getItem(FILTERS_KEY) ?? "null");
     if (!v) return null;
     const color = [...STATUSES, "none"].includes(v.color) ? v.color : null;
-    return { onlyInside: v.onlyInside === true, color };
+    const place = ["inside", "week"].includes(v.place) ? v.place : v.onlyInside === true ? "inside" : "all";
+    return { place, color };
   } catch {
     return null;
   }
 }
 
-function saveFilters(v: { onlyInside: boolean; color: ColorFilter }) {
+function saveFilters(v: { place: Place; color: ColorFilter }) {
   try {
     sessionStorage.setItem(FILTERS_KEY, JSON.stringify(v));
   } catch {}

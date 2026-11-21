@@ -4,6 +4,9 @@ export const TAGS = ["Llegada", "Salida", "Daños", "Reparación", "Revisión", 
 export type Tag = (typeof TAGS)[number];
 
 export const ENTRY_TAG: Tag = "Llegada";
+/** A partir de aquí, un coche en el taller salta como alarma. */
+export const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
 export const EXIT_TAGS: readonly Tag[] = ["Salida", "Entrega al cliente"];
 
 const TAG_RE = new RegExp(`^(${TAGS.join("|")})(?::\\s*|$)([\\s\\S]*)$`);

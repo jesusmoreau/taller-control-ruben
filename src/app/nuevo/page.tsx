@@ -6,6 +6,7 @@ import { Icon } from "@/components/icons";
 import { PlateScanner } from "@/components/PlateScanner";
 import { VoiceRecorder, type RecordedNote } from "@/components/VoiceRecorder";
 import { AudioPlayer } from "@/components/AudioPlayer";
+import { DurationInput, WorkerPicker, postWork, useWorkers } from "@/components/work";
 import { Card, Header, Notice, SectionTitle, inputClass, primaryButton, secondaryButton } from "@/components/ui";
 import { compressImage } from "@/lib/image";
 import { formatPlate, isValidPlate, normalizePlate } from "@/lib/plate";
@@ -36,6 +37,10 @@ function NewEventForm() {
   const now = useNow();
   const [carStatus, setCarStatus] = useState<{ plate: string; isNew: boolean; insideSince: string | null } | null>(null);
   const [description, setDescription] = useState("");
+  // Tiempo de trabajo opcional: quién trabajó y cuánto (termina a la hora del evento).
+  const workers = useWorkers();
+  const [workerIds, setWorkerIds] = useState<string[]>([]);
+  const [workMinutes, setWorkMinutes] = useState(0);
   const [photos, setPhotos] = useState<Pending[]>([]);
   const [notes, setNotes] = useState<RecordedNote[]>([]);
   // Estado de la transcripción de cada nota de voz, por id.
@@ -49,7 +54,7 @@ function NewEventForm() {
 
   const normalized = normalizePlate(plate);
   const plateOk = isValidPlate(normalized);
-  const dirty = Boolean(description || photos.length || notes.length || tagTouched);
+  const dirty = Boolean(description || photos.length || notes.length || tagTouched || workerIds.length);
 
   // Al tener una matrícula válida, consultar su historial:
   // coche nuevo o fuera del taller → se marca "Llegada"; si está dentro, se avisa.
@@ -174,7 +179,26 @@ function NewEventForm() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      router.push(`/coche/${normalized}?guardado=1`);
+
+      // El evento ya está guardado: si falla el tiempo, se avisa en la ficha en vez de repetir el evento.
+      let saved = "1";
+      if (workerIds.length && workMinutes > 0) {
+        const end = new Date(occurredAt);
+        try {
+          await postWork({
+            action: "manual",
+            workerIds,
+            plate: normalized,
+            eventId: data.id,
+            description: text,
+            startedAt: new Date(end.getTime() - workMinutes * 60000).toISOString(),
+            endedAt: end.toISOString(),
+          });
+        } catch {
+          saved = "sin-tiempo";
+        }
+      }
+      router.push(`/coche/${normalized}?guardado=${saved}`);
     } catch (e) {
       setSaving(false);
       setProgress(null);
@@ -337,6 +361,22 @@ function NewEventForm() {
           </div>
         </Card>
 
+        {/* Tiempo de trabajo */}
+        {workers && workers.length > 0 && (
+          <Card className="animate-fade-up [animation-delay:60ms]">
+            <SectionTitle aside={<span className="text-xs text-muted">Opcional</span>}>Tiempo de trabajo</SectionTitle>
+            <p className="mb-2 text-sm text-muted">¿Quién trabajó en el coche?</p>
+            <WorkerPicker workers={workers} selected={workerIds} onChange={setWorkerIds} />
+            {workerIds.length > 0 && (
+              <div className="animate-fade-up mt-4">
+                <p className="mb-2 text-sm text-muted">¿Cuánto tiempo{workerIds.length > 1 ? " cada uno" : ""}?</p>
+                <DurationInput minutes={workMinutes} onChange={setWorkMinutes} />
+                {workMinutes === 0 && <p className="mt-2 text-xs text-warn">Indica el tiempo o quita los operarios.</p>}
+              </div>
+            )}
+          </Card>
+        )}
+
         {/* Fotos */}
         <Card className="animate-fade-up [animation-delay:80ms]">
           <SectionTitle aside={photos.length > 0 && <span className="text-xs text-muted">{photos.length}</span>}>
@@ -384,7 +424,7 @@ function NewEventForm() {
       </main>
 
       <div className="fixed inset-x-0 bottom-0 z-20 border-t border-line/60 bg-header p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] backdrop-blur-xl">
-        <button onClick={save} disabled={saving || transcribing || !normalized} className={`${primaryButton} relative mx-auto flex w-full max-w-xl overflow-hidden py-4 text-lg`}>
+        <button onClick={save} disabled={saving || transcribing || !normalized || (workerIds.length > 0 && workMinutes === 0)} className={`${primaryButton} relative mx-auto flex w-full max-w-xl overflow-hidden py-4 text-lg`}>
           {progress && (
             <span
               className="absolute inset-y-0 left-0 bg-white/20 transition-all duration-300"

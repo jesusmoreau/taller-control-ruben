@@ -5,7 +5,8 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Icon } from "@/components/icons";
 import { PlateBadge } from "@/components/PlateBadge";
 import { Header, Notice, Skeleton } from "@/components/ui";
-import { buildDayReport, type ReportCar, type ReportEvent } from "@/lib/report";
+import { buildDayReport, buildWorkReport, type ReportCar, type ReportEvent } from "@/lib/report";
+import type { WorkSession } from "@/lib/types";
 import { STATUSES, STATUS_INFO, type WorkStatus } from "@/lib/status";
 import { formatDuration } from "@/lib/tags";
 import { formatDate } from "@/lib/time";
@@ -40,20 +41,22 @@ export default function ReportPage() {
     day: string;
     events: ReportEvent[];
     statuses: Record<string, WorkStatus>;
+    sessions: WorkSession[];
   } | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
-    const { end } = dayBounds(day);
-    fetch(`/api/report?until=${encodeURIComponent(new Date(end).toISOString())}`)
+    const { start, end } = dayBounds(day);
+    const iso = (t: number) => encodeURIComponent(new Date(t).toISOString());
+    fetch(`/api/report?from=${iso(start)}&until=${iso(end)}`)
       .then(async (res) => ({ ok: res.ok, body: await res.json() }))
       .then(({ ok, body }) => {
         if (cancelled) return;
         if (!ok) setError(body.error ?? "No se pudo cargar el reporte");
         else {
           setError("");
-          setData({ day, events: body.events, statuses: body.statuses });
+          setData({ day, events: body.events, statuses: body.statuses, sessions: body.sessions ?? [] });
         }
       })
       .catch(() => !cancelled && setError("No se pudo cargar el reporte"));
@@ -70,6 +73,11 @@ export default function ReportPage() {
   }, [data]);
   const now = useNow();
   const isToday = day === today;
+  const work = useMemo(() => {
+    if (!data) return [];
+    const { start, end } = dayBounds(data.day);
+    return buildWorkReport(data.sessions, start, end, Math.min(end, now));
+  }, [data, now]);
   // Tiempo parado: hasta ahora si es hoy, hasta el final del día si es un día pasado.
   const ref = isToday ? now : dayBounds(day).end;
   const title = new Date(dayBounds(day).start).toLocaleDateString("es-ES", {
@@ -157,23 +165,25 @@ export default function ReportPage() {
 
         {report && !loading && (
           <>
-            <Section title="Entraron" count={report.entered.length} empty="Ningún coche entró este día.">
-              {report.entered.map((c) => (
-                <Row key={`${c.plate}-${c.at}`} car={c} aside={hour(c.at!)}>
-                  {c.insideSince ? "Sigue en el taller" : "Ya salió"}
-                  {c.body && ` · ${c.body}`}
-                </Row>
-              ))}
-            </Section>
+            <div className="grid grid-cols-2 gap-2">
+              <Column title="Entraron" count={report.entered.length} empty="Ninguno">
+                {report.entered.map((c) => (
+                  <MiniRow key={c.plate} car={c} time={hour(c.at!)} note={c.insideSince ? "Sigue dentro" : "Ya salió"} />
+                ))}
+              </Column>
+              <Column title="Salieron" count={report.exited.length} empty="Ninguno">
+                {report.exited.map((c) => (
+                  <MiniRow
+                    key={c.plate}
+                    car={c}
+                    time={hour(c.at!)}
+                    note={c.stayMs != null ? `${formatDuration(c.stayMs)} dentro` : (c.tag ?? "")}
+                  />
+                ))}
+              </Column>
+            </div>
 
-            <Section title="Salieron" count={report.exited.length} empty="Ningún coche salió este día.">
-              {report.exited.map((c) => (
-                <Row key={`${c.plate}-${c.at}`} car={c} aside={hour(c.at!)}>
-                  {c.tag}
-                  {c.stayMs != null && ` · ${formatDuration(c.stayMs)} en el taller`}
-                </Row>
-              ))}
-            </Section>
+            <WorkSection work={work} />
 
             <Section
               title="Siguen en el taller"
@@ -275,5 +285,83 @@ function Row({ car, aside, children }: { car: ReportCar; aside: ReactNode; child
         <div className="shrink-0 text-right text-sm tabular-nums text-muted">{aside}</div>
       </Link>
     </li>
+  );
+}
+
+function Column({ title, count, empty, children }: { title: string; count: number; empty: string; children: ReactNode }) {
+  return (
+    <section className="animate-fade-up min-w-0 rounded-2xl border border-line bg-surface p-2 shadow-card">
+      <h2 className="mb-2 px-1 text-xs font-semibold uppercase tracking-wider text-muted">
+        {title} · {count}
+      </h2>
+      {count === 0 ? <p className="px-1 pb-1 text-sm text-muted">{empty}</p> : <ul className="flex flex-col gap-1">{children}</ul>}
+    </section>
+  );
+}
+
+function MiniRow({ car, time, note }: { car: ReportCar; time: string; note: string }) {
+  const s = car.status ?? "none";
+  return (
+    <li>
+      <Link href={`/coche/${car.plate}`} className="block rounded-xl px-1 py-1.5 transition active:bg-surface-2">
+        <div className="flex items-center gap-1.5">
+          <span
+            className={`h-2.5 w-2.5 shrink-0 rounded-full ${DOT[s]}`}
+            role="img"
+            aria-label={s === "none" ? "Sin estado" : STATUS_INFO[s].label}
+          />
+          <span className="truncate font-mono text-[15px] font-bold tracking-wide">{car.plate}</span>
+        </div>
+        <p className="truncate pl-4 text-xs text-muted">
+          {time} · {note}
+        </p>
+      </Link>
+    </li>
+  );
+}
+
+function WorkSection({ work }: { work: ReturnType<typeof buildWorkReport> }) {
+  return (
+    <section className="animate-fade-up">
+      <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">Tiempo por operario</h2>
+      {work.length === 0 ? (
+        <p className="rounded-2xl border border-dashed border-line px-4 py-3 text-sm text-muted">
+          No hay tiempo de trabajo registrado este día.
+        </p>
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {work.map((w) => (
+            <li key={w.workerId} className="rounded-2xl border border-line bg-surface p-3 shadow-card">
+              <div className="flex items-baseline gap-2">
+                <span className="flex-1 font-semibold">
+                  {w.name}
+                  {w.running && <span className="ml-2 text-xs font-semibold text-success">● trabajando</span>}
+                </span>
+                <span className="text-lg font-bold tabular-nums">{formatDuration(w.totalMs)}</span>
+              </div>
+              <p className="text-xs text-muted">
+                {w.cars.length} {w.cars.length === 1 ? "coche" : "coches"}
+                {w.freeMs > 0 && ` · ${formatDuration(w.freeMs)} sin coche`}
+              </p>
+              {w.cars.length > 0 && (
+                <ul className="mt-2 flex flex-wrap gap-1.5">
+                  {w.cars.map((c) => (
+                    <li key={c.plate}>
+                      <Link
+                        href={`/coche/${c.plate}`}
+                        className="inline-flex items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-1 text-xs"
+                      >
+                        <span className="font-mono font-bold">{c.plate}</span>
+                        <span className="text-muted">{formatDuration(c.ms)}</span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }

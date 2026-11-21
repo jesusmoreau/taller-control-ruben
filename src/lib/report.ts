@@ -104,3 +104,44 @@ export function buildDayReport(
   report.idle.sort((a, b) => (a.lastActivity ?? "").localeCompare(b.lastActivity ?? ""));
   return report;
 }
+
+// ── Tiempo por operario en el día ─────────────────────────────────────────────
+
+export type WorkerDay = {
+  workerId: string;
+  name: string;
+  totalMs: number;
+  /** Tiempo sin coche. */
+  freeMs: number;
+  /** Tiempo por coche, de más a menos. */
+  cars: { plate: string; ms: number }[];
+  running: boolean;
+};
+
+type Session = { workerId: string; workerName: string; plate: string | null; startedAt: string; endedAt: string | null };
+
+/** Suma el tiempo de cada operario dentro del día (recortando los tramos que lo cruzan). */
+export function buildWorkReport(sessions: Session[], start: number, end: number, now: number): WorkerDay[] {
+  const byWorker = new Map<string, WorkerDay & { carMap: Map<string, number> }>();
+  for (const s of sessions) {
+    const from = Math.max(start, new Date(s.startedAt).getTime());
+    const to = Math.min(end, s.endedAt ? new Date(s.endedAt).getTime() : now);
+    const ms = to - from;
+    if (ms <= 0) continue;
+    let w = byWorker.get(s.workerId);
+    if (!w) {
+      w = { workerId: s.workerId, name: s.workerName, totalMs: 0, freeMs: 0, cars: [], running: false, carMap: new Map() };
+      byWorker.set(s.workerId, w);
+    }
+    w.totalMs += ms;
+    if (!s.endedAt) w.running = true;
+    if (s.plate) w.carMap.set(s.plate, (w.carMap.get(s.plate) ?? 0) + ms);
+    else w.freeMs += ms;
+  }
+  return [...byWorker.values()]
+    .map(({ carMap, ...w }) => ({
+      ...w,
+      cars: [...carMap].map(([plate, ms]) => ({ plate, ms })).sort((a, b) => b.ms - a.ms),
+    }))
+    .sort((a, b) => b.totalMs - a.totalMs);
+}

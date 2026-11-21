@@ -2,26 +2,8 @@ import { NextResponse } from "next/server";
 import { BUCKET, supabaseAdmin } from "@/lib/supabase-server";
 import { normalizePlate } from "@/lib/plate";
 import { computeStays } from "@/lib/tags";
-import { isStatus, type WorkStatus } from "@/lib/status";
+import { carsByPlate, emptyCar, ensureCar, platesWithStatus } from "@/lib/cars";
 import type { CarEvent, PlateSummary } from "@/lib/types";
-
-// Semáforo de cada matrícula. Si la tabla "cars" aún no existe, devuelve un mapa vacío
-// para que la app siga funcionando sin el semáforo.
-async function statusesFor(db: ReturnType<typeof supabaseAdmin>, plates: string[]) {
-  const map = new Map<string, WorkStatus>();
-  if (!plates.length) return map;
-  const { data } = await db.from("cars").select("plate, status").in("plate", plates);
-  data?.forEach((c) => isStatus(c.status) && map.set(c.plate, c.status));
-  return map;
-}
-
-// Todos los coches con el semáforo puesto (son pocos: los que están en curso en el taller).
-async function activeStatuses(db: ReturnType<typeof supabaseAdmin>) {
-  const map = new Map<string, WorkStatus>();
-  const { data } = await db.from("cars").select("plate, status").not("status", "is", null);
-  data?.forEach((c) => isStatus(c.status) && map.set(c.plate, c.status));
-  return map;
-}
 
 type PhotoRow = { id: string; path: string; kind: "plate" | "car" };
 type AudioRow = { id: string; path: string; duration_ms: number; mime: string };
@@ -68,8 +50,8 @@ export async function GET(request: Request) {
       audios: e.audios.map((a) => ({ id: a.id, url: urls.get(a.path) ?? "", durationMs: a.duration_ms, mime: a.mime })),
     }));
     const p = normalizePlate(plate);
-    const status = (await statusesFor(db, [p])).get(p) ?? null;
-    return NextResponse.json({ events, status });
+    const car = (await carsByPlate(db, [p])).get(p) ?? emptyCar(p);
+    return NextResponse.json({ events, car });
   }
 
   const q = normalizePlate(params.get("q") ?? "");
@@ -109,13 +91,17 @@ export async function GET(request: Request) {
         thumbPath: photo?.path ?? null,
         insideSince: computeStays(byPlate.get(row.plate) ?? []).openSince,
         status: null,
+        blockedReason: null,
+        make: null,
+        model: null,
       });
     }
   }
   // Los 50 más recientes, más cualquier coche que esté en el taller o tenga el semáforo
   // puesto, para que los filtros de la lista no se dejen ninguno.
-  const statuses = await activeStatuses(db);
-  const list = [...map.values()].filter((s, i) => i < 50 || s.insideSince || statuses.has(s.plate));
+  const withStatus = await platesWithStatus(db);
+  const list = [...map.values()].filter((s, i) => i < 50 || s.insideSince || withStatus.has(s.plate));
+  const cars = await carsByPlate(db, list.map((s) => s.plate));
 
   const paths = list.map((s) => s.thumbPath).filter((p): p is string => Boolean(p));
   const urls = new Map<string, string>();
@@ -126,7 +112,10 @@ export async function GET(request: Request) {
 
   const plates: PlateSummary[] = list.map(({ thumbPath, ...s }) => ({
     ...s,
-    status: statuses.get(s.plate) ?? null,
+    status: cars.get(s.plate)?.status ?? null,
+    blockedReason: cars.get(s.plate)?.blockedReason ?? null,
+    make: cars.get(s.plate)?.make ?? null,
+    model: cars.get(s.plate)?.model ?? null,
     thumb: thumbPath ? (urls.get(thumbPath) ?? null) : null,
   }));
   return NextResponse.json({ plates });
@@ -146,9 +135,7 @@ export async function POST(request: Request) {
 
   const db = supabaseAdmin();
   // Cada evento pertenece a un coche: si es la primera vez que entra, se crea su ficha.
-  const { error: carError } = await db
-    .from("cars")
-    .upsert({ plate }, { onConflict: "plate", ignoreDuplicates: true });
+  const { error: carError } = await ensureCar(db, plate);
   if (carError) return NextResponse.json({ error: carError.message }, { status: 500 });
 
   const { data: event, error } = await db

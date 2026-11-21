@@ -10,11 +10,12 @@ import { PlateBadge } from "@/components/PlateBadge";
 import { TrafficLight } from "@/components/TrafficLight";
 import { Header, Notice, Skeleton, Toast } from "@/components/ui";
 import { normalizePlate } from "@/lib/plate";
-import { computeStays, formatDuration, splitTag } from "@/lib/tags";
+import { WEEK_MS, computeStays, formatDuration, splitTag } from "@/lib/tags";
 import { formatDate, formatDateTime, timeAgo } from "@/lib/time";
 import { useNow } from "@/lib/useNow";
-import type { WorkStatus } from "@/lib/status";
-import type { CarEvent } from "@/lib/types";
+import { CarDataCard } from "@/components/CarData";
+import { CarWorkPanel } from "@/components/work";
+import type { CarEvent, CarInfo } from "@/lib/types";
 
 const TAG_STYLE: Record<string, string> = {
   Llegada: "bg-accent-soft text-accent",
@@ -31,12 +32,18 @@ export function CarView({ plate: rawPlate }: { plate: string }) {
   const pathname = usePathname();
   const params = useSearchParams();
   const [events, setEvents] = useState<CarEvent[] | null>(null);
-  const [status, setStatus] = useState<WorkStatus | null>(null);
+  const [car, setCar] = useState<CarInfo | null>(null);
   const [error, setError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [viewer, setViewer] = useState<{ urls: string[]; start: number } | null>(null);
-  const [toast, setToast] = useState(params.get("guardado") ? "Evento guardado" : "");
+  const [toast, setToast] = useState(
+    params.get("guardado") === "sin-tiempo"
+      ? "Evento guardado, pero no el tiempo: añádelo abajo"
+      : params.get("guardado")
+        ? "Evento guardado"
+        : "",
+  );
   const [version, setVersion] = useState(0);
 
   // Quitar ?guardado=1 de la URL para que el aviso no reaparezca al recargar.
@@ -53,7 +60,7 @@ export function CarView({ plate: rawPlate }: { plate: string }) {
         if (!ok) setError(data.error ?? "Error cargando eventos");
         else {
           setEvents(data.events);
-          setStatus(data.status ?? null);
+          setCar(data.car ?? null);
         }
       });
     return () => {
@@ -77,6 +84,7 @@ export function CarView({ plate: rawPlate }: { plate: string }) {
   const first = events?.length ? events[events.length - 1].occurred_at : null;
   const now = useNow();
   const stays = events ? computeStays(events, now) : null;
+  const overWeek = Boolean(stays?.openSince && now - new Date(stays.openSince).getTime() > WEEK_MS);
 
   return (
     <>
@@ -87,13 +95,30 @@ export function CarView({ plate: rawPlate }: { plate: string }) {
           <PlateBadge plate={plate} size="lg" />
           {first && <p className="-mt-2 text-xs text-muted">Primer registro: {formatDate(first)}</p>}
 
-          {events ? (
-            <TrafficLight key={status ?? "none"} plate={plate} status={status} />
+          {events && car ? (
+            <TrafficLight
+              key={`${car.status}-${car.blockedReason}`}
+              plate={plate}
+              initial={{ status: car.status, blockedReason: car.blockedReason, blockedNote: car.blockedNote }}
+            />
           ) : (
             !error && <Skeleton className="h-[106px] w-full" />
           )}
 
-          {stays?.openSince && (
+          {stays?.openSince && overWeek && (
+            <div className="animate-fade-up flex w-full items-center gap-3 rounded-2xl border border-danger/40 bg-danger-soft px-4 py-3 text-left">
+              <Icon name="alert" size={20} className="shrink-0 text-danger" />
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold text-danger">Más de una semana en el taller</p>
+                <p className="text-sm text-fg/80">
+                  Lleva {formatDuration(now - new Date(stays.openSince).getTime())} · entró el{" "}
+                  {formatDateTime(stays.openSince)}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {stays?.openSince && !overWeek && (
             <div className="animate-fade-up flex w-full items-center gap-3 rounded-2xl border border-success/30 bg-success-soft px-4 py-3 text-left">
               <span className="relative flex h-3 w-3 shrink-0">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-60" />
@@ -119,6 +144,13 @@ export function CarView({ plate: rawPlate }: { plate: string }) {
         </section>
 
         {error && <Notice tone="danger">{error}</Notice>}
+
+        {car && events && (
+          <>
+            <CarDataCard key={JSON.stringify(car)} car={car} onSaved={setCar} />
+            <CarWorkPanel plate={plate} />
+          </>
+        )}
 
         {events === null && !error && (
           <div className="flex flex-col gap-3">

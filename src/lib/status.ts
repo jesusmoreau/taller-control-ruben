@@ -15,3 +15,12 @@ export const STATUS_INFO: Record<WorkStatus, { label: string; hint: string }> = 
 export function isStatus(v: unknown): v is WorkStatus {
   return typeof v === "string" && (STATUSES as readonly string[]).includes(v);
 }
+
+// Motivos por los que un coche está en rojo (no se puede tocar).
+export const BLOCK_REASONS = [
+  "Sin presupuesto",
+  "El cliente no acepta",
+  "Sin material",
+  "Capacidad del taller",
+  "Otro",
+] as const;

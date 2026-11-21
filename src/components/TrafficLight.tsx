@@ -1,7 +1,10 @@
 "use client";
 
-import { useState } from "react";
-import { STATUSES, STATUS_INFO, type WorkStatus } from "@/lib/status";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
+import { Icon } from "@/components/icons";
+import { inputClass, primaryButton } from "@/components/ui";
+import { BLOCK_REASONS, STATUSES, STATUS_INFO, type WorkStatus } from "@/lib/status";
 
 const LIGHT: Record<WorkStatus, { on: string; off: string; text: string }> = {
   red: {
@@ -21,47 +24,63 @@ const LIGHT: Record<WorkStatus, { on: string; off: string; text: string }> = {
   },
 };
 
-// Guarda el estado en el servidor con actualización optimista: cambia al instante
-// y, si falla, vuelve al color anterior.
-function useStatus(plate: string, initial: WorkStatus | null, onChange?: (s: WorkStatus | null) => void) {
-  const [status, setStatus] = useState(initial);
-  const [saving, setSaving] = useState(false);
-  const [failed, setFailed] = useState(false);
+export type LightState = { status: WorkStatus | null; blockedReason: string | null; blockedNote: string | null };
 
-  async function pick(next: WorkStatus) {
-    const value = status === next ? null : next; // tocar la luz encendida la apaga
-    const prev = status;
-    setStatus(value);
+// Guarda el estado en el servidor con actualización optimista: cambia al instante
+// y, si falla, vuelve al anterior. Al poner rojo, primero se pide el motivo.
+function useLight(plate: string, initial: LightState, onChange?: (s: LightState) => void) {
+  const [state, setState] = useState(initial);
+  const [failed, setFailed] = useState(false);
+  const [askReason, setAskReason] = useState(false);
+
+  async function save(next: LightState) {
+    const prev = state;
+    setState(next);
     setFailed(false);
-    setSaving(true);
     navigator.vibrate?.(15);
     const res = await fetch(`/api/cars/${plate}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ status: value }),
+      body: JSON.stringify(next),
     }).catch(() => null);
-    setSaving(false);
-    if (res?.ok) onChange?.(value);
+    if (res?.ok) onChange?.(next);
     else {
-      setStatus(prev);
+      setState(prev);
       setFailed(true);
     }
   }
 
-  return { status, saving, failed, pick };
+  function pick(s: WorkStatus) {
+    if (state.status === s) return save({ status: null, blockedReason: null, blockedNote: null }); // apagar
+    if (s === "red") return setAskReason(true);
+    save({ status: s, blockedReason: null, blockedNote: null });
+  }
+
+  const sheet = askReason && (
+    <ReasonSheet
+      initial={state.status === "red" ? state : null}
+      onCancel={() => setAskReason(false)}
+      onSave={(reason, note) => {
+        setAskReason(false);
+        save({ status: "red", blockedReason: reason, blockedNote: note });
+      }}
+    />
+  );
+
+  return { state, failed, pick, sheet, editReason: () => setAskReason(true) };
 }
 
 /** Semáforo vertical compacto, pensado para el lateral de una tarjeta de la lista. */
 export function TrafficLightCompact({
   plate,
-  status: initial,
+  initial,
   onChange,
 }: {
   plate: string;
-  status: WorkStatus | null;
-  onChange?: (s: WorkStatus | null) => void;
+  initial: LightState;
+  onChange?: (s: LightState) => void;
 }) {
-  const { status, failed, pick } = useStatus(plate, initial, onChange);
+  const { state, failed, pick, sheet } = useLight(plate, initial, onChange);
   return (
     <div
       role="radiogroup"
@@ -72,30 +91,26 @@ export function TrafficLightCompact({
         <button
           key={s}
           role="radio"
-          aria-checked={status === s}
+          aria-checked={state.status === s}
           aria-label={STATUS_INFO[s].label}
           title={STATUS_INFO[s].label}
           onClick={() => pick(s)}
           className="grid flex-1 place-items-center transition active:scale-90"
         >
           <span
-            className={`block h-4 w-4 rounded-full transition duration-200 ${status === s ? LIGHT[s].on : LIGHT[s].off}`}
+            className={`block h-4 w-4 rounded-full transition duration-200 ${state.status === s ? LIGHT[s].on : LIGHT[s].off}`}
           />
         </button>
       ))}
+      {sheet}
     </div>
   );
 }
 
 /** Semáforo grande con etiquetas, para la ficha del coche. */
-export function TrafficLight({
-  plate,
-  status: initial,
-}: {
-  plate: string;
-  status: WorkStatus | null;
-}) {
-  const { status, failed, pick } = useStatus(plate, initial);
+export function TrafficLight({ plate, initial }: { plate: string; initial: LightState }) {
+  const { state, failed, pick, sheet, editReason } = useLight(plate, initial);
+  const { status } = state;
   return (
     <div className="w-full">
       <div
@@ -127,13 +142,97 @@ export function TrafficLight({
           );
         })}
       </div>
+      {status === "red" && (
+        <button
+          onClick={editReason}
+          className="mt-2 flex w-full items-start gap-2 rounded-xl border border-signal-red/30 bg-danger-soft px-3 py-2 text-left text-sm"
+        >
+          <Icon name="alert" size={16} className="mt-0.5 shrink-0 text-signal-red" />
+          <span className="min-w-0 flex-1">
+            <span className="font-semibold text-signal-red">{state.blockedReason ?? "Sin motivo"}</span>
+            {state.blockedNote && <span className="block text-fg/80">{state.blockedNote}</span>}
+          </span>
+          <span className="shrink-0 text-xs font-semibold text-accent">Cambiar</span>
+        </button>
+      )}
       <p className={`mt-1.5 text-center text-xs ${failed ? "text-danger" : "text-muted"}`}>
         {failed
           ? "No se pudo guardar el estado. Inténtalo de nuevo."
           : status
-            ? STATUS_INFO[status].hint
+            ? status === "red"
+              ? ""
+              : STATUS_INFO[status].hint
             : "Sin estado · toca un color para marcarlo"}
       </p>
+      {sheet}
     </div>
+  );
+}
+
+/** Hoja inferior para elegir por qué el coche está en rojo. */
+function ReasonSheet({
+  initial,
+  onCancel,
+  onSave,
+}: {
+  initial: LightState | null;
+  onCancel: () => void;
+  onSave: (reason: string, note: string | null) => void;
+}) {
+  const [reason, setReason] = useState<string | null>(initial?.blockedReason ?? null);
+  const [note, setNote] = useState(initial?.blockedNote ?? "");
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onCancel();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 backdrop-blur-sm" onClick={onCancel}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Motivo del bloqueo"
+        onClick={(e) => e.stopPropagation()}
+        className="animate-fade-up w-full max-w-xl rounded-t-3xl bg-surface p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-card"
+      >
+        <div className="mb-4 flex items-center gap-3">
+          <span className={`h-5 w-5 rounded-full ${LIGHT.red.on}`} />
+          <h2 className="flex-1 text-lg font-bold">¿Por qué está bloqueado?</h2>
+          <button onClick={onCancel} aria-label="Cancelar" className="grid h-9 w-9 place-items-center rounded-full text-muted hover:bg-surface-2">
+            <Icon name="x" size={18} />
+          </button>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          {BLOCK_REASONS.map((r) => (
+            <button
+              key={r}
+              onClick={() => setReason(r)}
+              aria-pressed={reason === r}
+              className={`min-h-12 rounded-xl border px-3 py-2 text-left text-sm font-semibold transition active:scale-95 ${
+                reason === r ? "border-signal-red bg-danger-soft text-signal-red" : "border-line bg-surface-2 text-fg"
+              } ${r === "Otro" ? "col-span-2" : ""}`}
+            >
+              {r}
+            </button>
+          ))}
+        </div>
+        <input
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder={reason === "Otro" ? "Describe el motivo" : "Nota (opcional): p. ej. falta la bomba de agua"}
+          className={`${inputClass} mt-3`}
+        />
+        <button
+          onClick={() => reason && onSave(reason, note.trim() || null)}
+          disabled={!reason || (reason === "Otro" && !note.trim())}
+          className={`${primaryButton} mt-4 w-full py-3.5`}
+        >
+          Poner en rojo
+        </button>
+      </div>
+    </div>,
+    document.body,
   );
 }
