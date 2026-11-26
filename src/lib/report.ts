@@ -54,7 +54,7 @@ export function buildDayReport(
     exited: [],
     active: [],
     idle: [],
-    insideByStatus: { red: 0, yellow: 0, green: 0, none: 0 },
+    insideByStatus: { red: 0, yellow: 0, green: 0, blue: 0, none: 0 },
   };
   const now = Math.min(end, Date.now());
 

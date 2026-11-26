@@ -23,6 +23,7 @@
   --signal-red: #e5383b;
   --signal-yellow: #f5b700;
   --signal-green: #1fb860;
+  --signal-blue: #2f6fe4;
   --shadow: 0 1px 2px rgb(16 24 40 / 0.04), 0 4px 16px rgb(16 24 40 / 0.06);
   --header: rgb(244 245 248 / 0.8);
 }
@@ -48,6 +49,7 @@
     --signal-red: #ff5a5f;
     --signal-yellow: #ffc933;
     --signal-green: #3ddc84;
+    --signal-blue: #5b9bff;
     --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px rgb(0 0 0 / 0.25);
     --header: rgb(11 13 18 / 0.75);
   }
@@ -73,6 +75,7 @@
   --signal-red: #ff5a5f;
   --signal-yellow: #ffc933;
   --signal-green: #3ddc84;
+  --signal-blue: #5b9bff;
   --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px rgb(0 0 0 / 0.25);
   --header: rgb(11 13 18 / 0.75);
 }
@@ -97,6 +100,7 @@
   --color-signal-red: var(--signal-red);
   --color-signal-yellow: var(--signal-yellow);
   --color-signal-green: var(--signal-green);
+  --color-signal-blue: var(--signal-blue);
   --shadow-card: var(--shadow);
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;

@@ -365,6 +365,7 @@ const CHIP_DOT: Record<Exclude<ColorFilter, null>, string> = {
   red: "bg-signal-red",
   yellow: "bg-signal-yellow",
   green: "bg-signal-green",
+  blue: "bg-signal-blue",
   none: "border border-muted/60",
 };
 

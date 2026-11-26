@@ -31,6 +31,7 @@ const DOT: Record<WorkStatus | "none", string> = {
   red: "bg-signal-red",
   yellow: "bg-signal-yellow",
   green: "bg-signal-green",
+  blue: "bg-signal-blue",
   none: "border border-muted/60",
 };
 

@@ -106,3 +106,7 @@ create index if not exists work_sessions_plate_idx on public.work_sessions (plat
 create index if not exists work_sessions_worker_idx on public.work_sessions (worker_id, started_at desc);
 -- Un operario solo puede tener un cronómetro en marcha.
 create unique index if not exists work_sessions_one_running on public.work_sessions (worker_id) where ended_at is null;
+
+-- ── Estado "Terminado" (blue) en el semáforo ──
+alter table public.cars drop constraint if exists cars_status_check;
+alter table public.cars add constraint cars_status_check check (status in ('red', 'yellow', 'green', 'blue'));

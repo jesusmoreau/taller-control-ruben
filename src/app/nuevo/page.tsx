@@ -260,8 +260,8 @@ function NewEventForm() {
             {status?.insideSince && (
               <Notice tone="success">
                 Este coche está en el taller desde hace{" "}
-                {formatDuration(now - new Date(status.insideSince).getTime())}. Si sale ahora, marca “Salida” o
-                “Entrega al cliente” y se calculará el tiempo.
+                {formatDuration(now - new Date(status.insideSince).getTime())}. Si sale ahora, marca “Salida” y se
+                calculará el tiempo.
               </Notice>
             )}
           </div>

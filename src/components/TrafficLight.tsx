@@ -22,6 +22,11 @@ const LIGHT: Record<WorkStatus, { on: string; off: string; text: string }> = {
     off: "bg-signal-green/20",
     text: "text-signal-green",
   },
+  blue: {
+    on: "bg-signal-blue shadow-[0_0_12px_2px_var(--signal-blue)]",
+    off: "bg-signal-blue/20",
+    text: "text-signal-blue",
+  },
 };
 
 export type LightState = { status: WorkStatus | null; blockedReason: string | null; blockedNote: string | null };
@@ -116,7 +121,7 @@ export function TrafficLight({ plate, initial }: { plate: string; initial: Light
       <div
         role="radiogroup"
         aria-label="Estado del trabajo"
-        className={`grid w-full grid-cols-3 gap-1.5 rounded-2xl border border-line bg-surface p-1.5 shadow-card ${
+        className={`grid w-full grid-cols-4 gap-1.5 rounded-2xl border border-line bg-surface p-1.5 shadow-card ${
           failed ? "animate-shake" : ""
         }`}
       >

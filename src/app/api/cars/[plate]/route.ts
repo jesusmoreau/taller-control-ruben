@@ -7,7 +7,7 @@ import { isStatus } from "@/lib/status";
 const text = (v: unknown, max = 120) => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null);
 
 // PATCH /api/cars/:plate → cambia solo los campos enviados:
-//   { status: "red" | "yellow" | "green" | null, blockedReason?, blockedNote? }  semáforo (el motivo solo en rojo)
+//   { status: "red" | "yellow" | "green" | "blue" | null, blockedReason?, blockedNote? }  semáforo (el motivo solo en rojo)
 //   { make?, model?, engine?, km? }                                              datos del coche
 export async function PATCH(request: Request, ctx: { params: Promise<{ plate: string }> }) {
   const plate = normalizePlate(decodeURIComponent((await ctx.params).plate));

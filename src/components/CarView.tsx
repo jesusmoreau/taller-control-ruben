@@ -19,6 +19,7 @@ import type { CarEvent, CarInfo } from "@/lib/types";
 
 const TAG_STYLE: Record<string, string> = {
   Llegada: "bg-accent-soft text-accent",
+  Diagnosticado: "bg-accent-soft text-accent",
   Salida: "bg-surface-2 text-fg",
   Daños: "bg-danger-soft text-danger",
   Reparación: "bg-warn-soft text-warn",

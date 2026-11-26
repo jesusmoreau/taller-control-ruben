@@ -1,7 +1,11 @@
 // Tipos de evento. Se guardan como prefijo de la descripción: "Llegada: texto".
 
-export const TAGS = ["Llegada", "Salida", "Daños", "Reparación", "Revisión", "Entrega al cliente"] as const;
-export type Tag = (typeof TAGS)[number];
+/** Los que se ofrecen al crear un evento. */
+export const TAGS = ["Llegada", "Diagnosticado", "Reparación", "Salida"] as const;
+/** Ya no se ofrecen, pero se siguen reconociendo en los eventos antiguos. */
+const LEGACY_TAGS = ["Daños", "Revisión", "Entrega al cliente"] as const;
+const ALL_TAGS = [...TAGS, ...LEGACY_TAGS] as const;
+export type Tag = (typeof ALL_TAGS)[number];
 
 export const ENTRY_TAG: Tag = "Llegada";
 /** Días laborables (lunes a viernes) seguidos en el taller a partir de los cuales salta la alarma. */
@@ -29,7 +33,7 @@ export function isOverdue(insideSince: string | null, now = Date.now()): boolean
 
 export const EXIT_TAGS: readonly Tag[] = ["Salida", "Entrega al cliente"];
 
-const TAG_RE = new RegExp(`^(${TAGS.join("|")})(?::\\s*|$)([\\s\\S]*)$`);
+const TAG_RE = new RegExp(`^(${ALL_TAGS.join("|")})(?::\\s*|$)([\\s\\S]*)$`);
 
 export function splitTag(text: string): { tag: Tag | null; body: string } {
   const m = text.match(TAG_RE);
