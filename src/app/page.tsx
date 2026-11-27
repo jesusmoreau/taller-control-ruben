@@ -7,7 +7,8 @@ import { Icon } from "@/components/icons";
 import { PlateBadge } from "@/components/PlateBadge";
 import { PlateScanner } from "@/components/PlateScanner";
 import { TrafficLightCompact, type LightState } from "@/components/TrafficLight";
-import { Header, SectionTitle, Skeleton, inputClass } from "@/components/ui";
+import { Header, SectionTitle, Skeleton, Toast, inputClass } from "@/components/ui";
+import { VoiceCommand } from "@/components/VoiceCommand";
 import { formatPlate, normalizePlate } from "@/lib/plate";
 import { STATUSES, STATUS_INFO, type WorkStatus } from "@/lib/status";
 import { ALARM_WORKDAYS, formatDuration, workdaysSince } from "@/lib/tags";
@@ -20,6 +21,9 @@ export default function Home() {
   const [q, setQ] = useState("");
   const [result, setResult] = useState<{ q: string; plates: PlateSummary[] } | null>(null);
   const query = normalizePlate(q);
+  // Se incrementa para volver a pedir la lista (p. ej. tras un comando de voz).
+  const [reload, setReload] = useState(0);
+  const [toast, setToast] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -32,7 +36,7 @@ export default function Home() {
       cancelled = true;
       clearTimeout(t);
     };
-  }, [query]);
+  }, [query, reload]);
 
   // Filtros: dónde está el coche y color del semáforo. Se recuerdan en la sesión
   // para que sigan puestos al volver de la ficha de un coche.
@@ -348,13 +352,22 @@ export default function Home() {
         </section>
       </main>
 
-      <Link
-        href={query ? `/nuevo?plate=${query}` : "/nuevo"}
-        className="fixed bottom-[calc(1.25rem+env(safe-area-inset-bottom))] right-5 z-20 flex h-14 items-center gap-2 rounded-full bg-accent pl-5 pr-6 font-semibold text-accent-fg shadow-[0_8px_24px_rgb(47_91_234/0.4)] transition hover:brightness-110 active:scale-95"
-      >
-        <Icon name="plus" size={22} />
-        Nuevo
-      </Link>
+      <div className="fixed bottom-[calc(1.25rem+env(safe-area-inset-bottom))] right-5 z-20 flex items-center gap-3">
+        <VoiceCommand
+          onApplied={(message) => {
+            setToast(message);
+            setReload((n) => n + 1);
+          }}
+        />
+        <Link
+          href={query ? `/nuevo?plate=${query}` : "/nuevo"}
+          className="flex h-14 items-center gap-2 rounded-full bg-accent pl-5 pr-6 font-semibold text-accent-fg shadow-[0_8px_24px_rgb(47_91_234/0.4)] transition hover:brightness-110 active:scale-95"
+        >
+          <Icon name="plus" size={22} />
+          Nuevo
+        </Link>
+      </div>
+      {toast && <Toast message={toast} onDone={() => setToast("")} />}
     </>
   );
 }

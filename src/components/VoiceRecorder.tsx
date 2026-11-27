@@ -10,7 +10,7 @@ const MAX_MS = 5 * 60 * 1000; // 5 minutos por nota
 // Formatos en orden de preferencia. iPhone graba en mp4 (AAC); Chrome/Android en webm (Opus).
 const CANDIDATES = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"];
 
-function pickMime(): string {
+export function pickMime(): string {
   if (typeof MediaRecorder === "undefined") return "";
   return CANDIDATES.find((t) => MediaRecorder.isTypeSupported(t)) ?? "";
 }
