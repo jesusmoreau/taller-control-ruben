@@ -26,9 +26,25 @@ export function fail(msg) {
 export async function pgClient() {
   const url = process.env.POSTGRES_URL_NON_POOLING;
   if (!url) fail("Falta POSTGRES_URL_NON_POOLING en .env.local");
-  const c = new pg.Client({ connectionString: url.replace(/[?&]sslmode=[^&]*/, ""), ssl: { rejectUnauthorized: false } });
-  await c.connect();
-  return c;
+  // La conexión directa a veces tarda o se corta al abrirse: se reintenta hasta 3 veces.
+  for (let attempt = 1; ; attempt++) {
+    const c = new pg.Client({
+      connectionString: url.replace(/[?&]sslmode=[^&]*/, ""),
+      ssl: { rejectUnauthorized: false },
+      connectionTimeoutMillis: 20_000,
+    });
+    // Sin esto, un corte de red tumba el proceso con un error sin capturar.
+    c.on("error", (e) => console.error(`· Conexión perdida: ${e.message}`));
+    try {
+      await c.connect();
+      return c;
+    } catch (e) {
+      await c.end().catch(() => {});
+      if (attempt === 3) fail(`No se pudo conectar a la base de datos: ${e.message}`);
+      console.error(`· No se pudo conectar (${e.message}); reintentando…`);
+      await new Promise((r) => setTimeout(r, 2000 * attempt));
+    }
+  }
 }
 
 export function adminClient() {
