@@ -1,9 +1,7 @@
 import "server-only";
-import { supabaseAdmin } from "./supabase-server";
+import type { Scoped } from "./session";
 import { isStatus } from "./status";
 import type { CarInfo, WorkSession } from "./types";
-
-type Db = ReturnType<typeof supabaseAdmin>;
 
 const CAR_COLUMNS = "plate, status, blocked_reason, blocked_note, make, model, engine, km";
 
@@ -36,17 +34,17 @@ function toCar(r: CarRow): CarInfo {
 }
 
 /** Ficha de cada matrícula pedida. Si falla la consulta, devuelve un mapa vacío. */
-export async function carsByPlate(db: Db, plates: string[]): Promise<Map<string, CarInfo>> {
+export async function carsByPlate(db: Scoped, plates: string[]): Promise<Map<string, CarInfo>> {
   const map = new Map<string, CarInfo>();
   if (!plates.length) return map;
-  const { data } = await db.from("cars").select(CAR_COLUMNS).in("plate", plates).returns<CarRow[]>();
+  const { data } = await db.select("cars", CAR_COLUMNS).in("plate", plates).returns<CarRow[]>();
   data?.forEach((r) => map.set(r.plate, toCar(r)));
   return map;
 }
 
 /** Matrículas con el semáforo puesto. */
-export async function platesWithStatus(db: Db): Promise<Set<string>> {
-  const { data } = await db.from("cars").select("plate").not("status", "is", null);
+export async function platesWithStatus(db: Scoped): Promise<Set<string>> {
+  const { data } = await db.select("cars", "plate").not("status", "is", null);
   return new Set(data?.map((r) => r.plate) ?? []);
 }
 
@@ -77,6 +75,6 @@ export function toSession(r: SessionRow): WorkSession {
 }
 
 /** Crea la ficha del coche si no existe (cada evento y cada tramo de trabajo apunta a un coche). */
-export async function ensureCar(db: Db, plate: string) {
-  return db.from("cars").upsert({ plate }, { onConflict: "plate", ignoreDuplicates: true });
+export async function ensureCar(db: Scoped, plate: string) {
+  return db.upsert("cars", { plate }, { onConflict: "workshop_id,plate", ignoreDuplicates: true });
 }

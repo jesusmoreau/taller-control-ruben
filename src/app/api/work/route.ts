@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { SESSION_COLUMNS, ensureCar, toSession, type SessionRow } from "@/lib/cars";
-import { supabaseAdmin } from "@/lib/supabase-server";
+import { requireSession } from "@/lib/session";
 import { normalizePlate } from "@/lib/plate";
 
 const MAX_MS = 24 * 60 * 60 * 1000; // un tramo metido a mano no puede pasar de 24 h
@@ -9,9 +9,11 @@ const MAX_MS = 24 * 60 * 60 * 1000; // un tramo metido a mano no puede pasar de 
 // GET /api/work?running=1     → todos los cronómetros en marcha
 // GET /api/work?free=1        → trabajo sin coche: en marcha y de los últimos 7 días
 export async function GET(request: Request) {
+  const s = await requireSession();
+  if (s instanceof NextResponse) return s;
   const params = new URL(request.url).searchParams;
-  const db = supabaseAdmin();
-  let query = db.from("work_sessions").select(SESSION_COLUMNS).order("started_at", { ascending: false });
+  const { db } = s;
+  let query = db.select("work_sessions", SESSION_COLUMNS).order("started_at", { ascending: false });
 
   const plate = params.get("plate");
   if (plate) query = query.eq("plate", normalizePlate(plate));
@@ -42,8 +44,10 @@ type Body = {
 //   { action: "stop", workerId }                          pausa su cronómetro
 //   { action: "manual", workerIds, plate?, eventId?, description?, startedAt, endedAt }  tiempo metido a mano
 export async function POST(request: Request) {
+  const s = await requireSession();
+  if (s instanceof NextResponse) return s;
   const body = (await request.json().catch(() => ({}))) as Body;
-  const db = supabaseAdmin();
+  const { db } = s;
   const now = new Date().toISOString();
   const plate = body.plate ? normalizePlate(body.plate) : null;
   const description = (body.description ?? "").trim().slice(0, 500);
@@ -54,7 +58,7 @@ export async function POST(request: Request) {
   }
 
   const stopRunning = (workerId: string) =>
-    db.from("work_sessions").update({ ended_at: now }).eq("worker_id", workerId).is("ended_at", null);
+    db.update("work_sessions", { ended_at: now }).eq("worker_id", workerId).is("ended_at", null);
 
   if (body.action === "start" || body.action === "stop") {
     if (!body.workerId) return NextResponse.json({ error: "Falta el operario" }, { status: 400 });
@@ -67,8 +71,7 @@ export async function POST(request: Request) {
     if (body.action === "stop") return NextResponse.json({ ok: true });
 
     const { error } = await db
-      .from("work_sessions")
-      .insert({ worker_id: body.workerId, plate, description, started_at: now, source: "timer" });
+      .insert("work_sessions", { worker_id: body.workerId, plate, description, started_at: now, source: "timer" });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ ok: true });
   }
@@ -96,7 +99,7 @@ export async function POST(request: Request) {
       ended_at: end.toISOString(),
       source: "manual",
     }));
-    const { error } = await db.from("work_sessions").insert(rows);
+    const { error } = await db.insert("work_sessions", rows);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ ok: true });
   }

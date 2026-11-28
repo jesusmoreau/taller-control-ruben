@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase-server";
+import { requireSession } from "@/lib/session";
 
 // GET /api/workers → operarios activos, en su orden.
 export async function GET() {
-  const { data, error } = await supabaseAdmin()
-    .from("workers")
-    .select("id, name")
+  const s = await requireSession();
+  if (s instanceof NextResponse) return s;
+  const { data, error } = await s.db
+    .select("workers", "id, name")
     .eq("active", true)
     .order("sort")
     .order("name");

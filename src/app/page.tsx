@@ -24,6 +24,13 @@ export default function Home() {
   // Se incrementa para volver a pedir la lista (p. ej. tras un comando de voz).
   const [reload, setReload] = useState(0);
   const [toast, setToast] = useState("");
+  const [me, setMe] = useState<{ workshopName: string } | null>(null);
+  useEffect(() => {
+    fetch("/api/me")
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setMe)
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -90,7 +97,7 @@ export default function Home() {
             <span className="grid h-8 w-8 place-items-center rounded-lg bg-accent text-accent-fg">
               <Icon name="car" size={18} />
             </span>
-            Taller
+            <span className="truncate">{me?.workshopName || "Taller"}</span>
           </span>
         }
         actions={

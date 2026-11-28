@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { carsByPlate, emptyCar, ensureCar } from "@/lib/cars";
-import { supabaseAdmin } from "@/lib/supabase-server";
+import { requireSession } from "@/lib/session";
 import { normalizePlate } from "@/lib/plate";
 import { isStatus } from "@/lib/status";
 
@@ -10,6 +10,8 @@ const text = (v: unknown, max = 120) => (typeof v === "string" && v.trim() ? v.t
 //   { status: "red" | "yellow" | "green" | "blue" | null, blockedReason?, blockedNote? }  semáforo (el motivo solo en rojo)
 //   { make?, model?, engine?, km? }                                              datos del coche
 export async function PATCH(request: Request, ctx: { params: Promise<{ plate: string }> }) {
+  const s = await requireSession();
+  if (s instanceof NextResponse) return s;
   const plate = normalizePlate(decodeURIComponent((await ctx.params).plate));
   if (!plate) return NextResponse.json({ error: "Falta la matrícula" }, { status: 400 });
 
@@ -36,10 +38,10 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ plate: st
   }
   if (!Object.keys(update).length) return NextResponse.json({ error: "Nada que cambiar" }, { status: 400 });
 
-  const db = supabaseAdmin();
+  const { db } = s;
   const { error: carError } = await ensureCar(db, plate);
   if (carError) return NextResponse.json({ error: carError.message }, { status: 500 });
-  const { error } = await db.from("cars").update(update).eq("plate", plate);
+  const { error } = await db.update("cars", update).eq("plate", plate);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   const car = (await carsByPlate(db, [plate])).get(plate) ?? emptyCar(plate);
